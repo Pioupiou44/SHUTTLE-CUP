@@ -72,40 +72,50 @@ export function computeStandings(
     const result = computeMatchResult(matchScores, rule)
     if (!result.winner) continue
 
-    // Identifie A et B depuis le match (teamA/teamB contiennent les IDs séparés par ',')
-    const idA = parseTeamId(match.teamA)
-    const idB = parseTeamId(match.teamB)
-    if (!idA || !idB) continue
+    // Extrait TOUS les IDs de chaque équipe (1 en simple, 2 en double)
+    const idsA = parseTeamIds(match.teamA)
+    const idsB = parseTeamIds(match.teamB)
+    if (idsA.length === 0 || idsB.length === 0) continue
 
-    const entryA = entries.get(idA)
-    const entryB = entries.get(idB)
-    if (!entryA || !entryB) continue
+    // Comptage des sets et points — commun aux deux équipes
+    const setsWonA = result.sets.filter((s) => s.winner === 'A').length
+    const setsWonB = result.sets.filter((s) => s.winner === 'B').length
+    const ptWonA = result.sets.reduce((acc, s) => acc + s.scoreA, 0)
+    const ptWonB = result.sets.reduce((acc, s) => acc + s.scoreB, 0)
 
-    entryA.matchesPlayed++
-    entryB.matchesPlayed++
-
-    for (const set of result.sets) {
-      if (set.winner === null) continue
-      entryA.setsWon   += result.sets.filter((s) => s.winner === 'A').length > 0 ? (set.winner === 'A' ? 1 : 0) : 0
-      entryA.setsLost  += set.winner === 'B' ? 1 : 0
-      entryB.setsWon   += set.winner === 'B' ? 1 : 0
-      entryB.setsLost  += set.winner === 'A' ? 1 : 0
-      entryA.pointsWon  += set.scoreA
-      entryA.pointsLost += set.scoreB
-      entryB.pointsWon  += set.scoreB
-      entryB.pointsLost += set.scoreA
+    // Applique les résultats à tous les membres de chaque équipe
+    for (const idA of idsA) {
+      const e = entries.get(idA)
+      if (!e) continue
+      e.matchesPlayed++
+      e.setsWon   += setsWonA
+      e.setsLost  += setsWonB
+      e.pointsWon  += ptWonA
+      e.pointsLost += ptWonB
+      if (result.winner === 'A') {
+        e.matchesWon++
+        e.rankPoints += 2
+      } else {
+        e.matchesLost++
+        e.rankPoints += match.status === 'walkover' ? 0 : 1
+      }
     }
 
-    if (result.winner === 'A') {
-      entryA.matchesWon++
-      entryA.rankPoints += 2
-      entryB.matchesLost++
-      entryB.rankPoints += match.status === 'walkover' ? 0 : 1
-    } else {
-      entryB.matchesWon++
-      entryB.rankPoints += 2
-      entryA.matchesLost++
-      entryA.rankPoints += match.status === 'walkover' ? 0 : 1
+    for (const idB of idsB) {
+      const e = entries.get(idB)
+      if (!e) continue
+      e.matchesPlayed++
+      e.setsWon   += setsWonB
+      e.setsLost  += setsWonA
+      e.pointsWon  += ptWonB
+      e.pointsLost += ptWonA
+      if (result.winner === 'B') {
+        e.matchesWon++
+        e.rankPoints += 2
+      } else {
+        e.matchesLost++
+        e.rankPoints += match.status === 'walkover' ? 0 : 1
+      }
     }
   }
 
@@ -123,8 +133,8 @@ export function computeStandings(
   })
 }
 
-function parseTeamId(team: string | undefined): number | null {
-  if (!team) return null
-  const n = parseInt(team, 10)
-  return isNaN(n) ? null : n
+/** Extrait tous les IDs joueurs d'une équipe (séparés par ',') */
+function parseTeamIds(team: string | undefined): number[] {
+  if (!team) return []
+  return team.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
 }

@@ -22,9 +22,9 @@ export interface PoolKnockoutConfig {
 
 export interface PoolKnockoutResult {
   /** Matchs de la phase de groupes (générés immédiatement) */
-  poolMatches: Omit<Match, 'id' | 'winnerId' | 'comment'>[]
+  poolMatches: Omit<Match, 'id' | 'winnerId'>[]
   /** Matchs placeholder de la phase knockout (remplis après groupes) */
-  knockoutMatches: Omit<Match, 'id' | 'winnerId' | 'comment'>[]
+  knockoutMatches: Omit<Match, 'id' | 'winnerId'>[]
   /** Attribution joueurs → groupe */
   pools: number[][]
 }
@@ -69,7 +69,7 @@ export function generatePoolPlusKnockout(
   // Phase 2 : Bracket knockout (qualifiés × poolCount joueurs)
   const knockoutSize = nextPowerOf2(qualifiers * poolCount)
   const knockoutRoundsCount = Math.log2(knockoutSize)
-  const knockoutMatches: Omit<Match, 'id' | 'winnerId' | 'comment'>[] = []
+  const knockoutMatches: Omit<Match, 'id' | 'winnerId'>[] = []
 
   // Round 1 du knockout (slots à remplir après groupes)
   for (let i = 0; i < knockoutSize / 2; i++) {

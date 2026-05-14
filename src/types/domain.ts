@@ -22,8 +22,13 @@ export interface Player {
   pseudo?: string
   gender: Gender
   level: string
+  club?: string
+  elo?: number
+  playerNumber?: number
   status: PlayerStatus
   createdAt: string
+  /** Nombre de tournois joués — calculé côté DB via JOIN */
+  tournamentCount?: number
 }
 
 export interface ScoringRule {
@@ -48,6 +53,12 @@ export interface Tournament {
   status: TournamentStatus
   scoringRuleId?: number
   categories: MatchCategory[]
+  /** 0 = tournoi individuel, 1 = rencontre par équipes (interclub) */
+  teamMode: number
+  teamAName?: string
+  teamBName?: string
+  /** Noms des équipes [idx] → lettre 'A'+idx (ex : ['Club Vertou', 'Club Saint-Mars', 'Club Nantes']) */
+  teamNames?: string[]
   createdAt: string
 }
 
@@ -57,6 +68,7 @@ export interface TournamentPlayer {
   playerId: number
   seed?: number
   status: TournamentPlayerStatus
+  teamSide?: string  // 'A' | 'B' — mode équipes uniquement
   // Jointure avec players
   firstName?: string
   lastName?: string
@@ -73,6 +85,7 @@ export interface Match {
   scheduledAt?: string
   status: MatchStatus
   winnerId?: number
+  winnerSide?: 'A' | 'B'
   comment?: string
   teamA?: string
   teamB?: string
@@ -87,9 +100,10 @@ export interface MatchScore {
   scoreB: number
 }
 
-// Nom d'affichage d'un joueur (prénom + nom ou pseudo)
+// Nom d'affichage d'un joueur (prénom + NOM en majuscules, ou pseudo)
 export function playerDisplayName(p: Pick<Player, 'firstName' | 'lastName' | 'pseudo'>): string {
-  return p.pseudo || `${p.firstName} ${p.lastName}`
+  if (p.pseudo) return p.pseudo
+  return `${p.firstName} ${p.lastName.toUpperCase()}`
 }
 
 // Libellés lisibles des catégories de match

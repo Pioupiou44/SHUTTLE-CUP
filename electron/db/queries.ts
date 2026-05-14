@@ -34,7 +34,13 @@ export function getDb(): Database.Database {
 
 export const playerQueries = {
   getAll(): unknown[] {
-    return getDb().prepare('SELECT * FROM players ORDER BY lastName, firstName').all()
+    return getDb().prepare(`
+      SELECT p.*, COUNT(DISTINCT tp.tournamentId) AS tournamentCount
+      FROM players p
+      LEFT JOIN tournament_players tp ON tp.playerId = p.id
+      GROUP BY p.id
+      ORDER BY p.elo DESC NULLS LAST, p.lastName, p.firstName
+    `).all()
   },
 
   create(p: {
@@ -43,24 +49,46 @@ export const playerQueries = {
     pseudo?: string
     gender: string
     level: string
+    club?: string
+    elo?: number
+    playerNumber?: number
     status?: string
   }): unknown {
     const stmt = getDb().prepare(
-      'INSERT INTO players (firstName, lastName, pseudo, gender, level, status) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO players (firstName, lastName, pseudo, gender, level, club, elo, playerNumber, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    const result = stmt.run(p.firstName, p.lastName, p.pseudo ?? null, p.gender, p.level, p.status ?? 'active')
-    return getDb().prepare('SELECT * FROM players WHERE id = ?').get(result.lastInsertRowid)
+    const result = stmt.run(
+      p.firstName, p.lastName, p.pseudo ?? null, p.gender, p.level,
+      p.club ?? null, p.elo ?? 1000, p.playerNumber ?? null, p.status ?? 'active'
+    )
+    return getDb().prepare(`
+      SELECT p.*, COUNT(DISTINCT tp.tournamentId) AS tournamentCount
+      FROM players p
+      LEFT JOIN tournament_players tp ON tp.playerId = p.id
+      WHERE p.id = ?
+      GROUP BY p.id
+    `).get(result.lastInsertRowid)
   },
 
   update(id: number, data: Record<string, unknown>): unknown {
-    const allowed = ['firstName', 'lastName', 'pseudo', 'gender', 'level', 'status']
+    const allowed = ['firstName', 'lastName', 'pseudo', 'gender', 'level', 'club', 'elo', 'playerNumber', 'status']
     const fields = Object.keys(data).filter((k) => allowed.includes(k))
-    if (fields.length === 0) return getDb().prepare('SELECT * FROM players WHERE id = ?').get(id)
+    if (fields.length === 0) {
+      return getDb().prepare(`
+        SELECT p.*, COUNT(DISTINCT tp.tournamentId) AS tournamentCount
+        FROM players p LEFT JOIN tournament_players tp ON tp.playerId = p.id
+        WHERE p.id = ? GROUP BY p.id
+      `).get(id)
+    }
 
     const setClause = fields.map((f) => `${f} = ?`).join(', ')
     const values = fields.map((f) => data[f])
     getDb().prepare(`UPDATE players SET ${setClause} WHERE id = ?`).run(...values, id)
-    return getDb().prepare('SELECT * FROM players WHERE id = ?').get(id)
+    return getDb().prepare(`
+      SELECT p.*, COUNT(DISTINCT tp.tournamentId) AS tournamentCount
+      FROM players p LEFT JOIN tournament_players tp ON tp.playerId = p.id
+      WHERE p.id = ? GROUP BY p.id
+    `).get(id)
   },
 
   delete(id: number): void {
@@ -123,7 +151,11 @@ export const scoringRuleQueries = {
 function parseTournament(row: Record<string, unknown>): Record<string, unknown> {
   let categories: string[] = []
   try { categories = JSON.parse((row.categories as string | null) ?? '[]') } catch { /* vide */ }
-  return { ...row, categories }
+  let teamNames: string[] | undefined
+  if (row.teamNames) {
+    try { teamNames = JSON.parse(row.teamNames as string) } catch { /* vide */ }
+  }
+  return { ...row, categories, teamNames }
 }
 
 export const tournamentQueries = {
@@ -141,21 +173,27 @@ export const tournamentQueries = {
     format: string
     scoringRuleId?: number
     categories?: string[]
+    teamMode?: number
+    teamAName?: string
+    teamBName?: string
+    teamNames?: string[]
   }): unknown {
     const stmt = getDb().prepare(
-      'INSERT INTO tournaments (name, date, location, courtCount, logoPath, format, scoringRuleId, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO tournaments (name, date, location, courtCount, logoPath, format, scoringRuleId, categories, teamMode, teamAName, teamBName, teamNames) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
     const result = stmt.run(
       t.name, t.date, t.location ?? null, t.courtCount ?? 4,
       t.logoPath ?? null, t.format, t.scoringRuleId ?? null,
-      JSON.stringify(t.categories ?? [])
+      JSON.stringify(t.categories ?? []),
+      t.teamMode ?? 0, t.teamAName ?? null, t.teamBName ?? null,
+      t.teamNames ? JSON.stringify(t.teamNames) : null
     )
     const row = getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(result.lastInsertRowid)
     return parseTournament(row as Record<string, unknown>)
   },
 
   update(id: number, data: Record<string, unknown>): unknown {
-    const allowed = ['name', 'date', 'location', 'courtCount', 'logoPath', 'format', 'status', 'scoringRuleId', 'categories']
+    const allowed = ['name', 'date', 'location', 'courtCount', 'logoPath', 'format', 'status', 'scoringRuleId', 'categories', 'teamMode', 'teamAName', 'teamBName', 'teamNames']
     const fields = Object.keys(data).filter((k) => allowed.includes(k))
     if (fields.length === 0) {
       const row = getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(id)
@@ -163,7 +201,11 @@ export const tournamentQueries = {
     }
 
     const setClause = fields.map((f) => `${f} = ?`).join(', ')
-    const values = fields.map((f) => f === 'categories' ? JSON.stringify(data[f]) : data[f])
+    const values = fields.map((f) => {
+      if (f === 'categories') return JSON.stringify(data[f])
+      if (f === 'teamNames') return JSON.stringify(data[f])
+      return data[f]
+    })
     getDb().prepare(`UPDATE tournaments SET ${setClause} WHERE id = ?`).run(...values, id)
     const row = getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(id)
     return parseTournament(row as Record<string, unknown>)
@@ -198,17 +240,67 @@ export const tournamentPlayerQueries = {
   remove(tournamentPlayerId: number): void {
     getDb().prepare('DELETE FROM tournament_players WHERE id = ?').run(tournamentPlayerId)
   },
+
+  /** Définit le côté d'équipe d'un joueur inscrit (lettre : 'A', 'B', 'C', ...). */
+  setTeamSide(tournamentPlayerId: number, side: string | null): void {
+    getDb().prepare('UPDATE tournament_players SET teamSide = ? WHERE id = ?').run(side, tournamentPlayerId)
+  },
 }
 
 // --- Matchs ---
 
+// --- Matchs ---
+
 export const matchQueries = {
+  /** Supprime tous les matchs (+ participants + scores) d'un tournoi — pour réinitialiser avant régénération. */
+  clearForTournament(tournamentId: number): void {
+    const db = getDb()
+    db.transaction(() => {
+      const matchIds = db.prepare('SELECT id FROM matches WHERE tournamentId = ?').all(tournamentId) as { id: number }[]
+      for (const m of matchIds) {
+        db.prepare('DELETE FROM match_scores WHERE matchId = ?').run(m.id)
+        db.prepare('DELETE FROM match_participants WHERE matchId = ?').run(m.id)
+      }
+      db.prepare('DELETE FROM matches WHERE tournamentId = ?').run(tournamentId)
+    })()
+  },
+
+  /** Échange les participants de deux slots (côtés) dans deux matchs — pour réorganisation avant lancement. */
+  swapMatchSides(matchId1: number, side1: 'A' | 'B', matchId2: number, side2: 'A' | 'B'): void {
+    const db = getDb()
+    db.transaction(() => {
+      const parts1 = db.prepare(
+        'SELECT tournamentPlayerId FROM match_participants WHERE matchId = ? AND side = ?'
+      ).all(matchId1, side1) as { tournamentPlayerId: number }[]
+      const parts2 = db.prepare(
+        'SELECT tournamentPlayerId FROM match_participants WHERE matchId = ? AND side = ?'
+      ).all(matchId2, side2) as { tournamentPlayerId: number }[]
+
+      db.prepare('DELETE FROM match_participants WHERE matchId = ? AND side = ?').run(matchId1, side1)
+      db.prepare('DELETE FROM match_participants WHERE matchId = ? AND side = ?').run(matchId2, side2)
+
+      for (const p of parts2) {
+        db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+          .run(matchId1, side1, p.tournamentPlayerId)
+      }
+      for (const p of parts1) {
+        db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+          .run(matchId2, side2, p.tournamentPlayerId)
+      }
+    })()
+  },
+
   getAll(tournamentId: number): unknown[] {
     // Retourne les IDs joueurs dans teamA/teamB pour que l'engine puisse les identifier
     return getDb().prepare(`
       SELECT m.*,
         GROUP_CONCAT(CASE WHEN mp.side='A' THEN CAST(p.id AS TEXT) END) as teamA,
-        GROUP_CONCAT(CASE WHEN mp.side='B' THEN CAST(p.id AS TEXT) END) as teamB
+        GROUP_CONCAT(CASE WHEN mp.side='B' THEN CAST(p.id AS TEXT) END) as teamB,
+        CASE
+          WHEN m.winnerId IS NULL THEN NULL
+          WHEN EXISTS (SELECT 1 FROM match_participants mp2 WHERE mp2.matchId = m.id AND mp2.side = 'A' AND mp2.tournamentPlayerId = m.winnerId) THEN 'A'
+          ELSE 'B'
+        END as winnerSide
       FROM matches m
       LEFT JOIN match_participants mp ON mp.matchId = m.id
       LEFT JOIN tournament_players tp ON tp.id = mp.tournamentPlayerId
@@ -249,6 +341,46 @@ export const matchQueries = {
     }
 
     return getDb().prepare('SELECT * FROM matches WHERE id = ?').get(matchId)
+  },
+
+  /** Crée un match avec plusieurs joueurs par équipe (doubles). */
+  createWithTeams(match: {
+    tournamentId: number
+    round?: number
+    courtNumber?: number
+    teamAPlayerIds: number[]
+    teamBPlayerIds: number[]
+    category?: string
+  }): unknown {
+    const db = getDb()
+    const matchResult = db
+      .prepare('INSERT INTO matches (tournamentId, round, courtNumber, status, category) VALUES (?, ?, ?, ?, ?)')
+      .run(match.tournamentId, match.round ?? null, match.courtNumber ?? null, 'pending', match.category ?? null)
+    const matchId = matchResult.lastInsertRowid as number
+
+    // Insère les participants côté A (autant que de joueurs dans l'équipe)
+    for (const playerId of match.teamAPlayerIds) {
+      const tp = db
+        .prepare('SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?')
+        .get(match.tournamentId, playerId) as { id: number } | undefined
+      if (tp) {
+        db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+          .run(matchId, 'A', tp.id)
+      }
+    }
+
+    // Insère les participants côté B
+    for (const playerId of match.teamBPlayerIds) {
+      const tp = db
+        .prepare('SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?')
+        .get(match.tournamentId, playerId) as { id: number } | undefined
+      if (tp) {
+        db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+          .run(matchId, 'B', tp.id)
+      }
+    }
+
+    return db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId)
   },
 
   updateStatus(matchId: number, status: string, winnerId?: number): void {
@@ -312,19 +444,54 @@ export const matchQueries = {
 
     const side = position % 2 === 0 ? 'A' : 'B'
 
+    // Retrouve le tournamentPlayerId du vainqueur
     const tp = db.prepare(
       'SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?'
     ).get(tournamentId, winnerPlayerId) as { id: number } | undefined
     if (!tp) return
 
-    const existing = db.prepare(
-      'SELECT id FROM match_participants WHERE matchId = ? AND side = ?'
-    ).get(targetMatch.id, side) as { id: number } | undefined
+    // Identifie le côté gagnant dans le match terminé (A ou B)
+    const winnerSideRow = db.prepare(
+      'SELECT side FROM match_participants WHERE matchId = ? AND tournamentPlayerId = ?'
+    ).get(completedMatchId, tp.id) as { side: string } | undefined
+    const winnerSide = winnerSideRow?.side ?? 'A'
 
-    if (existing) {
-      db.prepare('UPDATE match_participants SET tournamentPlayerId = ? WHERE id = ?').run(tp.id, existing.id)
-    } else {
-      db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)').run(targetMatch.id, side, tp.id)
+    // Récupère TOUS les participants de ce côté (simple = 1, doubles = 2)
+    const winnerParticipants = db.prepare(
+      'SELECT tournamentPlayerId FROM match_participants WHERE matchId = ? AND side = ?'
+    ).all(completedMatchId, winnerSide) as { tournamentPlayerId: number }[]
+
+    // Ne pas avancer si le créneau est déjà occupé (ex: matchs de poule round N+1)
+    const occupied = db.prepare(
+      'SELECT COUNT(*) as c FROM match_participants WHERE matchId = ? AND side = ?'
+    ).get(targetMatch.id, side) as { c: number }
+    if (occupied.c > 0) return
+
+    // Remplace les participants du côté cible dans le prochain match
+    db.prepare('DELETE FROM match_participants WHERE matchId = ? AND side = ?').run(targetMatch.id, side)
+    for (const p of winnerParticipants) {
+      db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+        .run(targetMatch.id, side, p.tournamentPlayerId)
+    }
+  },
+
+  /**
+   * Insère les participants dans les matchs de knockout d'après les qualifiants des poules.
+   * Chaque seed définit le matchId, le côté (A ou B) et les playerIds à placer.
+   */
+  seedKnockoutMatches(seeds: { matchId: number; side: 'A' | 'B'; playerIds: number[]; tournamentId: number }[]): void {
+    const db = getDb()
+    for (const seed of seeds) {
+      db.prepare('DELETE FROM match_participants WHERE matchId = ? AND side = ?').run(seed.matchId, seed.side)
+      for (const playerId of seed.playerIds) {
+        const tp = db.prepare(
+          'SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?'
+        ).get(seed.tournamentId, playerId) as { id: number } | undefined
+        if (tp) {
+          db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+            .run(seed.matchId, seed.side, tp.id)
+        }
+      }
     }
   },
 }
@@ -332,6 +499,37 @@ export const matchQueries = {
 // --- Admin ---
 
 export const adminQueries = {
+  /** Insère 16 joueurs de test (ne fait rien si des joueurs existent déjà). */
+  seedTestPlayers(): void {
+    const db = getDb()
+    const count = (db.prepare('SELECT COUNT(*) as n FROM players').get() as { n: number }).n
+    if (count > 0) return
+    const insert = db.prepare(
+      'INSERT INTO players (firstName, lastName, gender, level, club, elo, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+    db.transaction(() => {
+      const data: [string, string, string, string, string, number, string][] = [
+        ['Thomas',  'Dupont',    'M', 'Avancé',        'ST MARS',  1420, 'active'],
+        ['Lucas',   'Moreau',    'M', 'Avancé',        'VERTOU',   1380, 'active'],
+        ['Mathieu', 'Bernard',   'M', 'Intermédiaire', 'ST MARS',  1210, 'active'],
+        ['Kevin',   'Leroy',     'M', 'Intermédiaire', 'NANTES',   1185, 'active'],
+        ['Julien',  'Simon',     'M', 'Intermédiaire', 'REZÉ',     1160, 'active'],
+        ['Romain',  'Laurent',   'M', 'Intermédiaire', 'VERTOU',   1140, 'active'],
+        ['Antoine', 'Petit',     'M', 'Débutant',      'NANTES',    980, 'active'],
+        ['Pierre',  'Garcia',    'M', 'Débutant',      'ST MARS',   950, 'active'],
+        ['Nicolas', 'Martin',    'M', 'Débutant',      'REZÉ',      920, 'active'],
+        ['Camille', 'Rousseau',  'F', 'Avancé',        'VERTOU',   1350, 'active'],
+        ['Sophie',  'Girard',    'F', 'Avancé',        'NANTES',   1290, 'active'],
+        ['Julie',   'Fontaine',  'F', 'Intermédiaire', 'ST MARS',  1180, 'active'],
+        ['Marine',  'Leclerc',   'F', 'Intermédiaire', 'REZÉ',     1130, 'active'],
+        ['Lucie',   'Bonnet',    'F', 'Intermédiaire', 'NANTES',   1100, 'active'],
+        ['Emma',    'Chevalier', 'F', 'Débutant',      'VERTOU',    960, 'active'],
+        ['Claire',  'Dubois',    'F', 'Débutant',      'ST MARS',   930, 'active'],
+      ]
+      for (const row of data) insert.run(...row)
+    })()
+  },
+
   /** Supprime toutes les données utilisateur (joueurs, tournois, matchs, scores). */
   clearAllData(): void {
     const db = getDb()

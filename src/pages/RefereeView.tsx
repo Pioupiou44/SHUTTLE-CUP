@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTournamentsStore } from '@/store/tournamentsStore'
 import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
-import { Button } from '@/components/ui'
 import { playerDisplayName } from '@/types/domain'
 import { computeMatchResult, isSetComplete } from '@/engine/scoring'
 import type { ScoringRule } from '@/types/domain'
@@ -12,38 +11,74 @@ import type { ScoringRule } from '@/types/domain'
 
 interface SetScore { a: number; b: number }
 
-function useMatchClock(running: boolean) {
-  const [elapsed, setElapsed] = useState(0)
-  const ref = useRef<ReturnType<typeof setInterval> | null>(null)
+// ─── Score géant avec indicateur de service ───────────────────────────────────
 
-  useEffect(() => {
-    if (running) {
-      ref.current = setInterval(() => setElapsed((e) => e + 1), 1000)
-    } else {
-      if (ref.current) clearInterval(ref.current)
-    }
-    return () => { if (ref.current) clearInterval(ref.current) }
-  }, [running])
-
-  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
-  const ss = String(elapsed % 60).padStart(2, '0')
-  return { elapsed, label: `${mm}:${ss}`, reset: () => setElapsed(0) }
-}
-
-// ─── Score géant ──────────────────────────────────────────────────────────────
-
-function GiantScore({ value, isServer }: { value: number; isServer: boolean }) {
+function GiantScore({ value, isServer, textClass }: { value: number; isServer: boolean; textClass: string }) {
   return (
-    <div className="relative">
-      <span className="font-mono font-black text-[120px] leading-none tracking-[-0.04em]
-        tabular-nums select-none">
+    <div className="relative inline-block">
+      <span className={`font-mono font-black leading-none tracking-[-0.04em] tabular-nums ${textClass}`}
+        style={{ fontSize: '120px' }}>
         {String(value).padStart(2, '0')}
       </span>
       {isServer && (
-        <span className="absolute -top-2 -right-4 w-3 h-3 bg-yellow-400" />
+        <span className="absolute -top-2 -right-5 w-3.5 h-3.5 bg-yellow-400" />
       )}
     </div>
   )
+}
+
+function useMatchClock(running: boolean, matchId: number) {
+  const storageKey = `shuttle-clock-${matchId}`
+
+  // Restaure l'état depuis localStorage au montage
+  const [elapsed, setElapsed] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (!raw) return 0
+      const { e, ts } = JSON.parse(raw) as { e: number; ts: number | null }
+      // ts = horodatage absolu de l'origine du chrono (null si en pause)
+      return ts !== null ? Math.floor((Date.now() - ts) / 1000) : e
+    } catch { return 0 }
+  })
+
+  // Refs pour accéder aux valeurs courantes dans le cleanup
+  const elapsedRef = useRef(elapsed)
+  const runningRef = useRef(running)
+  elapsedRef.current = elapsed
+  runningRef.current = running
+
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (running) {
+      intervalRef.current = setInterval(() => setElapsed((e) => e + 1), 1000)
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [running])
+
+  // Persiste dans localStorage à la destruction du composant
+  useEffect(() => {
+    return () => {
+      try {
+        const e = elapsedRef.current
+        const isRunning = runningRef.current
+        localStorage.setItem(storageKey, JSON.stringify({
+          e,
+          ts: isRunning ? Date.now() - e * 1000 : null,
+        }))
+      } catch { /* ignorer les erreurs de stockage */ }
+    }
+  }, [storageKey])
+
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
+  const ss = String(elapsed % 60).padStart(2, '0')
+  const reset = () => {
+    setElapsed(0)
+    try { localStorage.removeItem(storageKey) } catch { /* ignorer */ }
+  }
+  return { elapsed, label: `${mm}:${ss}`, reset }
 }
 
 // ─── Page principale d'arbitrage ──────────────────────────────────────────────
@@ -58,11 +93,30 @@ export function RefereeView() {
   const { players } = usePlayersStore()
   const { rules } = useRulesStore()
 
+  const historyKey = `shuttle-history-${matchId}`
+
   const [sets, setSets] = useState<SetScore[]>([{ a: 0, b: 0 }])
-  const [history, setHistory] = useState<{ setIdx: number; side: 'a' | 'b' }[]>([])
+  const [history, setHistory] = useState<{ setIdx: number; side: 'a' | 'b' }[]>(() => {
+    try {
+      const raw = localStorage.getItem(`shuttle-history-${matchId}`)
+      return raw ? (JSON.parse(raw) as { setIdx: number; side: 'a' | 'b' }[]) : []
+    } catch { return [] }
+  })
   const [server, setServer] = useState<'a' | 'b'>('a')
   const [paused, setPaused] = useState(false)
   const [matchDone, setMatchDone] = useState(false)
+
+  // Walkover (abandon) d'un côté
+  const handleWalkover = async (side: 'a' | 'b') => {
+    if (matchDone) return
+    setMatchDone(true)
+    const winnerPlayerId = side === 'a' ? teamBId : teamAId // le gagnant est l'autre équipe
+    await window.db.updateMatchStatus(matchId, 'walkover', winnerPlayerId ?? undefined)
+    if (winnerPlayerId) {
+      await window.db.advanceWinner(tournamentId, matchId, winnerPlayerId)
+    }
+    navigate(`/tournaments/${tournamentId}`)
+  }
 
   // Infos match depuis l'IPC (basique — nom équipes)
   const [teamA, setTeamA] = useState<string>('Équipe A')
@@ -73,7 +127,12 @@ export function RefereeView() {
   const tournament = tournaments.find((t) => t.id === tournamentId)
   const rule = rules.find((r) => r.id === tournament?.scoringRuleId)
 
-  const clock = useMatchClock(!paused && !matchDone)
+  const clock = useMatchClock(!paused && !matchDone, matchId)
+
+  // Persiste l'historique du ruban dans localStorage
+  useEffect(() => {
+    try { localStorage.setItem(historyKey, JSON.stringify(history)) } catch { /* ignorer */ }
+  }, [history, historyKey])
 
   // Charge les participants et scores existants du match
   useEffect(() => {
@@ -84,10 +143,26 @@ export function RefereeView() {
       ])
       const m = matches.find((x) => x.id === matchId)
       if (m) {
-        const pa = players.find((p) => p.id === parseInt(m.teamA ?? '', 10))
-        const pb = players.find((p) => p.id === parseInt(m.teamB ?? '', 10))
-        if (pa) { setTeamA(playerDisplayName(pa)); setTeamAId(pa.id) }
-        if (pb) { setTeamB(playerDisplayName(pb)); setTeamBId(pb.id) }
+        // Résout tous les IDs d'une équipe (simple ou double)
+        const resolveTeamName = (teamStr: string | undefined): string => {
+          if (!teamStr) return ''
+          const ids = teamStr.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
+          const names = ids.map((id) => {
+            const p = players.find((p) => p.id === id)
+            return p ? playerDisplayName(p) : null
+          }).filter(Boolean)
+          return names.join(' / ')
+        }
+
+        const nameA = resolveTeamName(m.teamA)
+        const nameB = resolveTeamName(m.teamB)
+
+        // Pour l'avancement du bracket on garde le 1er joueur de l'équipe
+        const firstIdA = m.teamA ? parseInt(m.teamA.split(',')[0], 10) : NaN
+        const firstIdB = m.teamB ? parseInt(m.teamB.split(',')[0], 10) : NaN
+
+        if (nameA) { setTeamA(nameA); if (!isNaN(firstIdA)) setTeamAId(firstIdA) }
+        if (nameB) { setTeamB(nameB); if (!isNaN(firstIdB)) setTeamBId(firstIdB) }
         // Reprend les scores si match déjà commencé
         if (m.status === 'completed') setMatchDone(true)
       }
@@ -165,7 +240,7 @@ export function RefereeView() {
       })), rule as ScoringRule)
       if (res.isComplete) {
         setMatchDone(true)
-        const winnerPlayerId = res.winner === 'a' ? teamAId : teamBId
+        const winnerPlayerId = res.winner === 'A' ? teamAId : teamBId
         // Sauvegarde en BDD, avance le bracket, puis retour au planning
         void window.db.updateMatchStatus(matchId, 'completed', winnerPlayerId ?? undefined).then(async () => {
           if (winnerPlayerId) {
@@ -221,153 +296,287 @@ export function RefereeView() {
     return () => window.removeEventListener('keydown', handler)
   }, [history, sets, currentSetDone, matchDone, paused])
 
-  // ─── Rendu ────────────────────────────────────────────────────────────────
+// ─── Rendu ────────────────────────────────────────────────────────────────
+
+  // Points du set courant dans l'ordre (pour le ruban)
+  const currentSetHistory = history.filter((h) => h.setIdx === currentSetIndex)
 
   return (
-    <div className="flex flex-col h-full bg-bg text-ink">
-      {/* Header LIVE */}
-      <div className="flex items-center justify-between px-6 py-3 bg-ink border-b-2 border-line shrink-0">
-        <button
-          onClick={() => navigate(-1)}
-          className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-line-soft
-            hover:text-white transition-colors"
-        >
-          ← Retour
-        </button>
+    <div className="flex flex-col h-full select-none overflow-hidden">
 
-        <div className="flex items-center gap-3">
+      {/* ── Header broadcast ────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-4 py-2 bg-ink shrink-0 gap-4">
+        <div className="flex items-center gap-4">
           <span className="px-2 py-1 bg-red text-white text-[11px] font-mono font-bold
-            uppercase tracking-[0.08em] animate-pulse">
+            uppercase tracking-[0.08em] animate-pulse shrink-0">
             LIVE
           </span>
-          <span className="font-mono font-bold text-[18px] text-white tracking-[0.04em]">
-            {clock.label}
+          <span className="text-[11px] font-mono text-white/60 uppercase tracking-[0.08em]">
+            MATCH <span className="text-white font-bold">{String(matchId).padStart(2, '0')}</span>
           </span>
-          {paused && (
-            <span className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-warn">
-              PAUSE
+          {tournament?.categories?.[0] && (
+            <span className="text-[11px] font-mono text-white/60 uppercase tracking-[0.08em]">
+              {tournament.categories[0]}
+            </span>
+          )}
+          {rule && (
+            <span className="text-[11px] font-mono text-white/60 uppercase tracking-[0.08em]">
+              BO{rule.setsToWin * 2 - 1} · {rule.pointsPerSet}pts
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-mono text-line-soft">
-            Set {currentSetIndex + 1}
-            {sets.length > 1 ? ` · ${setsWonA}-${setsWonB}` : ''}
+        <div className="flex items-center gap-4">
+          {paused && (
+            <span className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-warn animate-pulse">
+              PAUSE
+            </span>
+          )}
+          <span className="font-mono font-bold text-[14px] text-white/60 tracking-[0.06em] uppercase">
+            T{currentSetIndex + 1} ·{' '}
+            <span className="text-white">{clock.label}</span>
           </span>
+          <button
+            onClick={() => navigate(`/tournaments/${tournamentId}`)}
+            className="px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors
+              text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-white border border-white/20"
+          >
+            PLAN ↗
+          </button>
         </div>
       </div>
 
-      {/* Zone principale : 3 colonnes */}
+      {/* ── Corps principal : 3 colonnes ────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Équipe A — bleu */}
-        <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-blue/5 border-r-2 border-line
-          cursor-pointer select-none active:bg-blue/15 transition-colors"
+
+        {/* Équipe A — fond bleu solide */}
+        <div
+          className="flex-1 flex flex-col bg-[#0047FF] cursor-pointer active:brightness-90 transition-all"
           onClick={() => addPoint('a')}
         >
-          <p className="font-sans font-black text-[30px] uppercase tracking-[-0.02em] text-blue text-center px-4">
-            {teamA}
-          </p>
-          <GiantScore value={currentSet.a} isServer={server === 'a'} />
-          {sets.length > 1 && (
-            <div className="flex gap-1">
-              {sets.slice(0, -1).map((s, i) => (
-                <span key={i}
-                  className={`text-[11px] font-mono font-bold px-2 py-1
-                    ${s.a > s.b ? 'bg-blue text-white' : 'bg-bg-strong text-ink-3'}`}>
-                  {s.a}
-                </span>
-              ))}
+          {/* Nom équipe */}
+          <div className="p-5 pt-6">
+            <div className="inline-block bg-white/20 px-2 py-0.5 mb-2">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-white">
+                TEAM A
+              </span>
             </div>
-          )}
-          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-blue/60">
-            Touche A ou ←
-          </p>
-        </div>
-
-        {/* Centre — actions */}
-        <div className="w-48 flex flex-col items-center justify-between py-8 shrink-0">
-          <div className="flex flex-col gap-2 items-center">
-            <Button variant="secondary" size="sm" onClick={() => setPaused((p) => !p)}>
-              {paused ? '▶ Reprendre' : '⏸ Pause'}
-            </Button>
-            <p className="text-[10px] font-mono text-ink-3 uppercase">Espace</p>
-          </div>
-
-          <div className="flex flex-col gap-1 items-center w-full px-4">
-            {/* Scores sets précédents */}
-            {sets.slice(0, -1).map((s, i) => (
-              <div key={i} className="flex items-center justify-between w-full text-[12px] font-mono text-ink-3">
-                <span>Set {i + 1}</span>
-                <span className={s.a > s.b ? 'font-bold text-blue' : ''}>{s.a}</span>
-                <span>–</span>
-                <span className={s.b > s.a ? 'font-bold text-green' : ''}>{s.b}</span>
+            {teamA.split(' / ').map((name, i) => (
+              <div key={i}
+                className="font-black uppercase tracking-[-0.02em] leading-[0.95] text-white"
+                style={{ fontSize: teamA.includes(' / ') ? '28px' : '36px' }}>
+                {name}
               </div>
             ))}
           </div>
 
-          <div className="flex flex-col gap-2 items-center w-full px-4">
-            <Button variant="secondary" size="sm"
-              onClick={undo} disabled={history.length === 0}
-              className="w-full justify-center"
-            >
-              ↩ Annuler
-            </Button>
-            <p className="text-[10px] font-mono text-ink-3 uppercase">Z ou ←</p>
-
-            {currentSetDone && !matchDone && (
-              <>
-                <Button size="sm" onClick={validateSet} className="w-full justify-center mt-2">
-                  Valider le set
-                </Button>
-                <p className="text-[10px] font-mono text-ink-3 uppercase">Entrée</p>
-              </>
-            )}
-
-            {matchDone && (
-              <div className="text-center">
-                <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green">
-                  Match terminé
-                </p>
-                <p className="font-sans font-black text-[18px] text-ink mt-1">
-                  {setsWonA > setsWonB ? teamA : teamB}
-                </p>
+          {/* Score centré */}
+          <div className="flex-1 flex flex-col items-center justify-center gap-4">
+            <GiantScore value={currentSet.a} isServer={server === 'a'} textClass="text-white" />
+            {/* Badges sets précédents */}
+            {sets.length > 1 && (
+              <div className="flex gap-1.5">
+                {sets.slice(0, -1).map((s, i) => (
+                  <span key={i}
+                    className={`text-[11px] font-mono font-bold px-2 py-1
+                      ${s.a > s.b ? 'bg-white text-[#0047FF]' : 'bg-white/20 text-white/60'}`}>
+                    {s.a}
+                  </span>
+                ))}
               </div>
             )}
+            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-white/50">
+              Touche A ou ←
+            </p>
           </div>
+
+          {/* Bouton +1 point */}
+          <button
+            className="w-full py-4 bg-white text-[#0047FF] font-black text-[16px]
+              uppercase tracking-[0.05em] hover:bg-white/90 active:bg-white/80 transition-colors
+              border-t-2 border-white/30 min-h-[56px]"
+            onClick={(e) => { e.stopPropagation(); addPoint('a') }}
+          >
+            [A] + 1 POINT
+          </button>
         </div>
 
-        {/* Équipe B — vert */}
-        <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-green/5 border-l-2 border-line
-          cursor-pointer select-none active:bg-green/10 transition-colors"
-          onClick={() => addPoint('b')}
-        >
-          <p className="font-sans font-black text-[30px] uppercase tracking-[-0.02em] text-green text-center px-4">
-            {teamB}
-          </p>
-          <GiantScore value={currentSet.b} isServer={server === 'b'} />
-          {sets.length > 1 && (
-            <div className="flex gap-1">
-              {sets.slice(0, -1).map((s, i) => (
-                <span key={i}
-                  className={`text-[11px] font-mono font-bold px-2 py-1
-                    ${s.b > s.a ? 'bg-green text-white' : 'bg-bg-strong text-ink-3'}`}>
-                  {s.b}
-                </span>
-              ))}
+        {/* Centre — contrôles */}
+        <div className="w-48 flex flex-col bg-bg border-x-2 border-line shrink-0">
+
+          {/* En-tête set courant */}
+          <div className="px-4 pt-4 pb-3 border-b border-line-soft text-center">
+            <div className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">
+              SET {currentSetIndex + 1} / {(rule?.setsToWin ?? 2) * 2 - 1}
+            </div>
+            <div className="font-mono font-black text-[28px] tracking-[-0.02em] text-ink leading-none mt-1">
+              {currentSet.a} : {currentSet.b}
+            </div>
+          </div>
+
+          {/* Scores des sets terminés */}
+          <div className="px-4 py-3 border-b border-line-soft flex flex-col gap-1.5 min-h-[40px]">
+            {sets.slice(0, -1).map((s, i) => (
+              <div key={i} className="flex items-center justify-between text-[12px] font-mono text-ink-3">
+                <span>Set {i + 1}</span>
+                <span className={s.a > s.b ? 'font-bold text-[#0047FF]' : ''}>{s.a}</span>
+                <span>–</span>
+                <span className={s.b > s.a ? 'font-bold text-ink' : ''}>{s.b}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Horloge */}
+          <div className="px-4 py-3 border-b border-line-soft text-center">
+            <div className="text-[10px] font-mono uppercase tracking-[0.08em] text-ink-3 mb-1">
+              HORLOGE
+            </div>
+            <div className="font-mono font-black text-[20px] text-ink tracking-[0.04em]">
+              {clock.label}
+            </div>
+          </div>
+
+          {/* Boutons actions */}
+          <div className="px-3 py-3 flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                disabled={history.length === 0}
+                onClick={undo}
+                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
+                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
+                  disabled:cursor-not-allowed transition-colors"
+              >↩ UNDO</button>
+              <button
+                onClick={() => setPaused((p) => !p)}
+                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
+                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong transition-colors"
+              >{paused ? '▶ REPRISE' : '⏸ PAUSE'}</button>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                disabled={matchDone}
+                onClick={() => handleWalkover('a')}
+                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
+                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
+                  disabled:cursor-not-allowed transition-colors"
+              >WO A</button>
+              <button
+                disabled={matchDone}
+                onClick={() => handleWalkover('b')}
+                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
+                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
+                  disabled:cursor-not-allowed transition-colors"
+              >WO B</button>
+            </div>
+          </div>
+
+          <div className="flex-1" />
+
+          {/* Match terminé */}
+          {matchDone && (
+            <div className="px-4 py-3 text-center border-t border-line-soft">
+              <div className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-green mb-1">
+                MATCH TERMINÉ
+              </div>
+              <div className="font-sans font-black text-[14px] text-ink">
+                {setsWonA > setsWonB ? teamA : teamB}
+              </div>
             </div>
           )}
-          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green/60">
-            Touche B ou →
-          </p>
+
+          {/* Valider le set */}
+          {currentSetDone && !matchDone && (
+            <button
+              onClick={validateSet}
+              className="w-full py-4 bg-ink text-green-fluo font-black text-[11px]
+                uppercase tracking-[0.05em] hover:brightness-110 transition-colors
+                border-t-2 border-line min-h-[56px]"
+            >
+              VALIDER LE SET →
+            </button>
+          )}
+        </div>
+
+        {/* Équipe B — fond vert-fluo */}
+        <div
+          className="flex-1 flex flex-col bg-[#00FF66] cursor-pointer active:brightness-90 transition-all"
+          onClick={() => addPoint('b')}
+        >
+          {/* Nom équipe */}
+          <div className="p-5 pt-6 flex flex-col items-end text-right">
+            <div className="inline-block bg-black/15 px-2 py-0.5 mb-2">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-ink">
+                TEAM B
+              </span>
+            </div>
+            {teamB.split(' / ').map((name, i) => (
+              <div key={i}
+                className="font-black uppercase tracking-[-0.02em] leading-[0.95] text-ink"
+                style={{ fontSize: teamB.includes(' / ') ? '28px' : '36px' }}>
+                {name}
+              </div>
+            ))}
+          </div>
+
+          {/* Score centré */}
+          <div className="flex-1 flex flex-col items-center justify-center gap-4">
+            <GiantScore value={currentSet.b} isServer={server === 'b'} textClass="text-ink" />
+            {/* Badges sets précédents */}
+            {sets.length > 1 && (
+              <div className="flex gap-1.5">
+                {sets.slice(0, -1).map((s, i) => (
+                  <span key={i}
+                    className={`text-[11px] font-mono font-bold px-2 py-1
+                      ${s.b > s.a ? 'bg-ink text-green-fluo' : 'bg-black/15 text-ink/50'}`}>
+                    {s.b}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink/50">
+              Touche B ou →
+            </p>
+          </div>
+
+          {/* Bouton +1 point */}
+          <button
+            className="w-full py-4 bg-ink text-green-fluo font-black text-[16px]
+              uppercase tracking-[0.05em] hover:brightness-110 active:brightness-90 transition-colors
+              border-t-2 border-ink/30 min-h-[56px]"
+            onClick={(e) => { e.stopPropagation(); addPoint('b') }}
+          >
+            + 1 POINT [B]
+          </button>
         </div>
       </div>
 
-      {/* Pied de page — raccourcis */}
-      <div className="flex items-center justify-center gap-6 px-6 py-2 bg-bg-alt border-t-2 border-line shrink-0">
+      {/* ── Ruban point-par-point ────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-4 py-1.5 bg-bg-strong border-t-2 border-line shrink-0 overflow-hidden">
+        <span className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 shrink-0">
+          POINT-BY-POINT → SET {currentSetIndex + 1}
+        </span>
+        <div className="flex gap-1 overflow-x-auto scrollbar-none flex-1">
+          {currentSetHistory.map((h, i) => (
+            <div
+              key={i}
+              className={`shrink-0 w-5 h-5 flex items-center justify-center
+                text-[9px] font-mono font-bold
+                ${h.side === 'a' ? 'bg-[#0047FF] text-white' : 'bg-[#00FF66] text-ink'}`}
+            >
+              {h.side === 'a' ? 'A' : 'B'}
+            </div>
+          ))}
+          {currentSetHistory.length === 0 && (
+            <span className="text-[10px] font-mono text-ink-3 italic">Aucun point encore</span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Footer raccourcis clavier ────────────────────────────────────── */}
+      <div className="flex items-center justify-center gap-5 px-6 py-2 bg-bg-alt border-t border-line-soft shrink-0">
         {[
-          { key: 'A/←', action: '+1 Équipe A' },
-          { key: 'B/→', action: '+1 Équipe B' },
+          { key: 'A / ←', action: '+1 Équipe A' },
+          { key: 'B / →', action: '+1 Équipe B' },
           { key: 'Z', action: 'Annuler' },
           { key: 'Espace', action: 'Pause' },
           { key: 'Entrée', action: 'Valider set' },
@@ -381,6 +590,7 @@ export function RefereeView() {
           </div>
         ))}
       </div>
+
     </div>
   )
 }

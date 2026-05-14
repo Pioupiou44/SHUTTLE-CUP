@@ -4,12 +4,11 @@ import { useTournamentsStore } from '@/store/tournamentsStore'
 import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
 import { Button, Input, Tag, Badge } from '@/components/ui'
-import { ChevronRight, ChevronLeft, Users, Trophy, Settings, AlignLeft } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Users, Trophy, Settings, AlignLeft, Shield, ChevronUp, ChevronDown, ChevronsUpDown, Shuffle, Plus, X, Layers2 } from 'lucide-react'
 import { playerDisplayName, FORMAT_LABELS, CATEGORY_LABELS } from '@/types/domain'
-import { countRoundRobinMatches, estimateDuration } from '@/engine/generators/roundRobin'
+import { countRoundRobinMatches } from '@/engine/generators/roundRobin'
 import { nextPowerOf2 } from '@/engine/generators/singleElim'
-import { countPoolKnockoutMatches } from '@/engine/generators/poolPlusKnockout'
-import type { TournamentFormat, MatchCategory } from '@/types/domain'
+import type { TournamentFormat, MatchCategory, Player, ScoringRule } from '@/types/domain'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,14 +18,21 @@ interface WizardData {
   date: string
   location: string
   courtCount: number
+  // Étape 3 — Équipes
+  teamMode: boolean
+  teamNames: string[]          // noms des équipes [idx] → lettre 'A'+idx
   // Étape 2 — Joueurs
   selectedPlayerIds: number[]
-  // Étape 3 — Format
+  // Étape 3 — Équipes : assignation
+  teamAssignments: Record<number, string>  // playerId -> lettre d'équipe ('A','B','C'...)
+  // Étape 4 — Format
   format: TournamentFormat
   categories: MatchCategory[]
   poolCount: number
-  // Étape 4 — Règles
+  // Étape 5 — Règles
   scoringRuleId: number | null
+  // Étape 6 — Composition doubles
+  doublesTeams: Partial<Record<MatchCategory, [number, number][]>>
 }
 
 const INITIAL: WizardData = {
@@ -34,12 +40,18 @@ const INITIAL: WizardData = {
   date: new Date().toISOString().slice(0, 10),
   location: '',
   courtCount: 2,
+  teamMode: false,
+  teamNames: ['Équipe A', 'Équipe B'],
   selectedPlayerIds: [],
+  teamAssignments: {},
   format: 'round-robin',
   categories: [],
   poolCount: 2,
   scoringRuleId: null,
+  doublesTeams: {},
 }
+
+const DOUBLES_CATS: MatchCategory[] = ['DH', 'DD', 'DX']
 
 const FORMAT_OPTIONS: { value: TournamentFormat; label: string }[] = [
   { value: 'round-robin',        label: 'Poules — Round Robin' },
@@ -51,52 +63,170 @@ const FORMAT_OPTIONS: { value: TournamentFormat; label: string }[] = [
   { value: 'king-of-court',      label: 'Roi du court' },
 ]
 
-const STEPS = [
-  { id: 1, label: 'Infos',    icon: AlignLeft },
-  { id: 2, label: 'Joueurs',  icon: Users },
-  { id: 3, label: 'Format',   icon: Trophy },
-  { id: 4, label: 'Règles',   icon: Settings },
+const BASE_STEPS = [
+  { id: 1, label: 'Infos',       icon: AlignLeft },
+  { id: 2, label: 'Joueurs',     icon: Users },
+  { id: 3, label: 'Équipes',     icon: Shield },
+  { id: 4, label: 'Format',      icon: Trophy },
+  { id: 5, label: 'Règles',      icon: Settings },
+  { id: 6, label: 'Composition', icon: Layers2 },
+]
+
+// ─── Couleurs des équipes (style inline car count dynamique) ─────────────────
+
+const TEAM_COLORS: { bg: string; text: string }[] = [
+  { bg: '#0047FF', text: '#ffffff' },   // A — bleu
+  { bg: '#0a0a0a', text: '#00FF66' },   // B — ink / vert-fluo
+  { bg: '#D97500', text: '#ffffff' },   // C — warn
+  { bg: '#E60022', text: '#ffffff' },   // D — red
+  { bg: '#00C24A', text: '#ffffff' },   // E — vert
+  { bg: '#4a4a4a', text: '#ffffff' },   // F — gris foncé
+  { bg: '#6600cc', text: '#ffffff' },   // G — violet
+  { bg: '#008080', text: '#ffffff' },   // H — teal
 ]
 
 // ─── Aperçu live (côté droit) ─────────────────────────────────────────────────
 
-function TournamentPreview({ data, playerNames, ruleName }: {
+/** Formate une durée en minutes en "~Xh" ou "~XhYY" */
+function fmtDuration(minutes: number): string {
+  if (minutes <= 0) return '—'
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `~${m} min`
+  return m === 0 ? `~${h}h` : `~${h}h${String(m).padStart(2, '0')}`
+}
+
+function TournamentPreview({ data, selectedPlayers, selectedRule }: {
   data: WizardData
-  playerNames: Map<number, string>
-  ruleName: string
+  selectedPlayers: Player[]
+  selectedRule: ScoringRule | undefined
 }) {
-  const n = data.selectedPlayerIds.length
+  const n = selectedPlayers.length
   const courts = data.courtCount
+  const maleCount = selectedPlayers.filter((p) => p.gender === 'M').length
+  const femaleCount = selectedPlayers.filter((p) => p.gender === 'F').length
 
-  let matchCount = 0
-  let duration = 0
-  let bracketInfo = ''
+  // ── Calcul simulation ────────────────────────────────────────────────────
+  type SimResult = { headline: string; detail: string; duration: string }
 
-  if (data.format === 'round-robin') {
-    matchCount = countRoundRobinMatches(n)
-    duration = estimateDuration(n, courts)
-    bracketInfo = `${matchCount} matchs, ${Math.ceil(n / 2)} rondes max`
-  } else if (data.format === 'knockout' || data.format === 'double-elimination') {
-    const size = n > 0 ? nextPowerOf2(n) : 0
-    matchCount = size > 0 ? size - 1 : 0
-    duration = Math.ceil(matchCount / courts) * 20
-    bracketInfo = `Bracket ${size > 0 ? size : '?'} — ${size - n} bye${size - n !== 1 ? 's' : ''}`
-  } else if (data.format === 'pool+knockout') {
-    matchCount = n > 1 ? countPoolKnockoutMatches(n, data.poolCount) : 0
-    duration = Math.ceil(matchCount / courts) * 20
-    bracketInfo = `${data.poolCount} groupes — ${n > 0 ? Math.ceil(n / data.poolCount) : '?'} joueurs/groupe`
-  } else {
-    matchCount = n > 0 ? Math.ceil(n / 2) * 3 : 0
-    duration = Math.ceil(matchCount / courts) * 20
-    bracketInfo = 'Estimation'
+  const simulate = (): SimResult | null => {
+    if (n < 2) return null
+
+    if (data.format === 'round-robin') {
+      const total = countRoundRobinMatches(n)
+      const rounds = n % 2 === 0 ? n - 1 : n
+      const dur = Math.ceil(total / courts) * 20
+      return {
+        headline: `${n} joueurs · ${rounds} rondes`,
+        detail: `→ ${total} matchs total`,
+        duration: `${fmtDuration(dur)} sur ${courts} terrain${courts > 1 ? 's' : ''}`,
+      }
+    }
+
+    if (data.format === 'knockout') {
+      const size = nextPowerOf2(n)
+      const total = size - 1
+      const byes = size - n
+      const dur = Math.ceil(total / courts) * 20
+      return {
+        headline: `Bracket ${size} · ${byes} bye${byes !== 1 ? 's' : ''}`,
+        detail: `→ ${total} matchs total`,
+        duration: `${fmtDuration(dur)} sur ${courts} terrain${courts > 1 ? 's' : ''}`,
+      }
+    }
+
+    if (data.format === 'double-elimination') {
+      const size = nextPowerOf2(n)
+      const total = size * 2 - 1
+      const dur = Math.ceil(total / courts) * 20
+      return {
+        headline: `Double élimination · bracket ${size}`,
+        detail: `→ ${total} matchs max`,
+        duration: `${fmtDuration(dur)} sur ${courts} terrain${courts > 1 ? 's' : ''}`,
+      }
+    }
+
+    if (data.format === 'pool+knockout') {
+      const poolSize = Math.ceil(n / data.poolCount)
+      const poolMatchesPerGroup = (poolSize * (poolSize - 1)) / 2
+      const poolTotal = data.poolCount * poolMatchesPerGroup
+      const finalSize = nextPowerOf2(data.poolCount * 2)
+      const koTotal = finalSize - 1
+      const total = poolTotal + koTotal
+      const dur = Math.ceil(total / courts) * 20
+      return {
+        headline: `${data.poolCount} poules de ${poolSize} · finale à ${finalSize}`,
+        detail: `→ ${total} matchs total`,
+        duration: `${fmtDuration(dur)} sur ${courts} terrain${courts > 1 ? 's' : ''}`,
+      }
+    }
+
+    if (data.format === 'americano') {
+      const rounds = Math.ceil((n - 1) / 2)
+      const total = Math.floor(n / 4) * rounds
+      const dur = Math.ceil(total / courts) * 20
+      return {
+        headline: `Américano · ${rounds} rondes`,
+        detail: `→ ~${total} matchs`,
+        duration: `${fmtDuration(dur)} sur ${courts} terrain${courts > 1 ? 's' : ''}`,
+      }
+    }
+
+    const total = Math.ceil(n / 2) * 3
+    const dur = Math.ceil(total / courts) * 20
+    return {
+      headline: FORMAT_OPTIONS.find((f) => f.value === data.format)?.label ?? data.format,
+      detail: `→ ~${total} matchs`,
+      duration: `${fmtDuration(dur)} sur ${courts} terrain${courts > 1 ? 's' : ''}`,
+    }
   }
 
+  // ── Avertissements ───────────────────────────────────────────────────────
+  const warnings: string[] = []
+
+  if (n < 2) {
+    warnings.push('Sélectionnez au moins 2 joueurs pour simuler le tournoi.')
+  }
+
+  if (data.format === 'knockout' && n < 3) {
+    warnings.push('Élimination directe : recommandé avec au moins 4 joueurs.')
+  }
+
+  if (data.format === 'pool+knockout' && data.poolCount > Math.floor(n / 2)) {
+    warnings.push(
+      `${data.poolCount} groupes pour ${n} joueurs : certains groupes auront 1 seul joueur. Réduisez le nombre de groupes.`
+    )
+  }
+
+  if (data.categories.includes('DX') && n >= 2) {
+    const pairsPossible = Math.min(maleCount, femaleCount)
+    const unpaired = Math.abs(maleCount - femaleCount)
+    if (unpaired > 0) {
+      warnings.push(
+        `${n} joueurs en double mixte → ${pairsPossible} paire${pairsPossible !== 1 ? 's' : ''} H+F possible${pairsPossible !== 1 ? 's' : ''}. ` +
+        `${unpaired} joueur${unpaired !== 1 ? 's' : ''} non appariable${unpaired !== 1 ? 's' : ''} — proposera ${unpaired} match${unpaired !== 1 ? 's' : ''} simple bonus.`
+      )
+    }
+  }
+
+  if ((data.categories.includes('DH') || data.categories.includes('DD')) && n >= 2) {
+    if (n % 2 !== 0) {
+      warnings.push(`${n} joueurs en double : 1 joueur sans partenaire — nécessite une composition manuelle.`)
+    }
+  }
+
+  if (!data.scoringRuleId) {
+    warnings.push('Aucune règle de scoring sélectionnée.')
+  }
+
+  const sim = simulate()
+
   return (
-    <div className="p-8 flex flex-col gap-8 h-full">
+    <div className="p-8 flex flex-col gap-6 h-full">
       {/* Nom */}
       <div>
         <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-1">Tournoi</p>
-        <p className="font-sans font-black uppercase text-[30px] tracking-[-0.02em] text-ink leading-none">
+        <p className="font-sans font-black uppercase text-[28px] tracking-[-0.02em] text-ink leading-none">
           {data.name || '—'}
         </p>
         {data.date && (
@@ -107,65 +237,84 @@ function TournamentPreview({ data, playerNames, ruleName }: {
         )}
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          { label: 'Joueurs',   value: String(n || '—') },
-          { label: 'Terrains',  value: String(courts) },
-          { label: 'Matchs est.', value: matchCount > 0 ? String(matchCount) : '—' },
-          { label: 'Durée est.', value: duration > 0 ? `${duration} min` : '—' },
-        ].map((s) => (
-          <div key={s.label}>
-            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">{s.label}</p>
-            <p className="font-sans font-black text-[28px] tracking-[-0.03em] text-ink leading-none mt-0.5">
-              {s.value}
+      {/* Stats clés */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <div>
+          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">Joueurs</p>
+          <p className="font-sans font-black text-[28px] tracking-[-0.03em] text-ink leading-none mt-0.5">
+            {n || '—'}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">Terrains</p>
+          <p className="font-sans font-black text-[28px] tracking-[-0.03em] text-ink leading-none mt-0.5">
+            {courts}
+          </p>
+        </div>
+        {data.categories.length > 0 && (
+          <div className="col-span-2">
+            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-1.5">Catégories</p>
+            <div className="flex gap-1 flex-wrap">
+              {data.categories.map((c) => (
+                <span key={c} className="text-[10px] font-mono font-bold px-2 py-1 bg-ink text-green-fluo">
+                  {c}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {selectedRule && (
+          <div className="col-span-2">
+            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-0.5">Règle de score</p>
+            <p className="font-sans font-bold text-[13px] text-ink">{selectedRule.name}</p>
+            <p className="font-sans text-[11px] text-ink-3 mt-0.5">
+              {selectedRule.pointsPerSet} pts · {selectedRule.setsToWin * 2 - 1} sets max
+              {selectedRule.hasDeuce ? ' · déuce' : ''}
+              {selectedRule.maxScore > 0 ? ` · plafond ${selectedRule.maxScore}` : ''}
+              {selectedRule.goldenPoint ? ' · golden point' : ''}
             </p>
           </div>
-        ))}
-      </div>
-
-      {/* Format + info bracket */}
-      <div>
-        <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">Format</p>
-        <Badge variant="active">{FORMAT_OPTIONS.find(f => f.value === data.format)?.label ?? data.format}</Badge>
-        {bracketInfo && (
-          <p className="font-sans text-[12px] text-ink-3 mt-2">{bracketInfo}</p>
         )}
-        {data.categories.length > 0 && (
-          <div className="flex gap-1 flex-wrap mt-2">
-            {data.categories.map((c) => (
-              <span key={c} className="text-[10px] font-mono font-bold px-2 py-1 bg-ink text-green-fluo">
-                {c}
-              </span>
-            ))}
+        {data.teamMode && (
+          <div className="col-span-2">
+            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-1.5">Rencontre</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {data.teamNames.map((name, idx) => {
+                const letter = String.fromCharCode(65 + idx)
+                const color = TEAM_COLORS[idx] ?? TEAM_COLORS[TEAM_COLORS.length - 1]
+                const count = selectedPlayers.filter((p) => data.teamAssignments[p.id] === letter).length
+                return (
+                  <span key={idx}
+                    className="px-2 py-1 font-mono font-bold text-[11px]"
+                    style={{ backgroundColor: color.bg, color: color.text }}>
+                    {name || `Équipe ${letter}`} · {count}
+                  </span>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Règle */}
-      {ruleName && (
-        <div>
-          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-1">Règle de scoring</p>
-          <p className="font-sans font-bold text-[15px] text-ink">{ruleName}</p>
+      {/* Bloc simulation */}
+      {sim && (
+        <div className="border-2 border-line-soft p-4 flex flex-col gap-1">
+          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">Simulation</p>
+          <p className="font-sans font-black text-[22px] tracking-[-0.02em] text-ink leading-tight">
+            {sim.headline}
+          </p>
+          <p className="font-sans font-bold text-[13px] text-blue">{sim.detail}</p>
+          <p className="font-sans text-[12px] text-ink-3 mt-1">Durée estimée : {sim.duration}</p>
         </div>
       )}
 
-      {/* Joueurs sélectionnés */}
-      {n > 0 && (
-        <div>
-          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
-            Participants ({n})
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {data.selectedPlayerIds.slice(0, 12).map((id) => (
-              <span key={id} className="text-[11px] font-mono font-bold text-ink bg-bg-strong px-2 py-1">
-                {playerNames.get(id) ?? `#${id}`}
-              </span>
-            ))}
-            {n > 12 && (
-              <span className="text-[11px] font-mono text-ink-3 px-2 py-1">+{n - 12}</span>
-            )}
-          </div>
+      {/* Avertissements */}
+      {warnings.length > 0 && (
+        <div className="border-2 border-warn p-4 flex flex-col gap-2">
+          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-warn mb-1">! Attention</p>
+          {warnings.map((w, i) => (
+            <p key={i} className="font-sans text-[12px] text-ink leading-snug">{w}</p>
+          ))}
         </div>
       )}
     </div>
@@ -185,8 +334,29 @@ function Step1({ data, onChange }: { data: WizardData; onChange: (d: Partial<Wiz
         <Input label="Lieu" placeholder="Ex : Gymnase Arago"
           value={data.location} onChange={(e) => onChange({ location: e.target.value })} />
       </div>
-      <Input label="Nombre de terrains" type="number" min={1} max={20}
-        value={String(data.courtCount)} onChange={(e) => onChange({ courtCount: Number(e.target.value) })} />
+      <div>
+        <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
+          Terrains disponibles
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: 8 }, (_, i) => i + 1).map((num) => {
+            const active = num <= data.courtCount
+            return (
+              <button
+                key={num}
+                onClick={() => onChange({ courtCount: num === data.courtCount && num > 1 ? num - 1 : num })}
+                className={`w-11 h-11 border-2 font-mono font-bold text-[12px] transition-colors
+                  ${active ? 'bg-green-fluo text-ink border-green-fluo' : 'bg-bg text-ink-3 border-line hover:border-blue'}`}
+              >
+                T{num}
+              </button>
+            )
+          })}
+        </div>
+        <p className="font-sans text-[12px] text-ink-3 mt-2">
+          {data.courtCount} terrain{data.courtCount !== 1 ? 's' : ''} actif{data.courtCount !== 1 ? 's' : ''}
+        </p>
+      </div>
     </div>
   )
 }
@@ -196,11 +366,54 @@ function Step2({ data, players, onChange }: {
   players: ReturnType<typeof usePlayersStore.getState>['players']
   onChange: (d: Partial<WizardData>) => void
 }) {
+  type SortKey2 = 'playerNumber' | 'lastName' | 'firstName' | 'pseudo' | 'gender' | 'level' | 'club' | 'elo'
   const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey2>('lastName')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
   const activePlayers = players.filter((p) => p.status === 'active')
-  const filtered = search
-    ? activePlayers.filter((p) => playerDisplayName(p).toLowerCase().includes(search.toLowerCase()))
-    : activePlayers
+
+  const handleSort = (key: SortKey2) => {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  const SortIcon = ({ k }: { k: SortKey2 }) =>
+    sortKey === k
+      ? sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />
+      : <ChevronsUpDown size={11} />
+
+  const filtered = activePlayers.filter((p) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      playerDisplayName(p).toLowerCase().includes(q) ||
+      (p.firstName ?? '').toLowerCase().includes(q) ||
+      (p.lastName ?? '').toLowerCase().includes(q) ||
+      (p.pseudo ?? '').toLowerCase().includes(q) ||
+      (p.club ?? '').toLowerCase().includes(q) ||
+      (p.level ?? '').toLowerCase().includes(q) ||
+      String(p.playerNumber ?? '').includes(q) ||
+      String(p.elo ?? '').includes(q) ||
+      (p.gender === 'M' ? 'h homme' : 'f femme').includes(q)
+    )
+  })
+
+  const sorted = [...filtered].sort((a, b) => {
+    let va: string | number = ''
+    let vb: string | number = ''
+    if (sortKey === 'playerNumber') { va = a.playerNumber ?? 9999; vb = b.playerNumber ?? 9999 }
+    else if (sortKey === 'lastName')  { va = (a.lastName ?? '').toLowerCase(); vb = (b.lastName ?? '').toLowerCase() }
+    else if (sortKey === 'firstName') { va = (a.firstName ?? '').toLowerCase(); vb = (b.firstName ?? '').toLowerCase() }
+    else if (sortKey === 'pseudo')    { va = (a.pseudo ?? '').toLowerCase(); vb = (b.pseudo ?? '').toLowerCase() }
+    else if (sortKey === 'gender')    { va = a.gender ?? ''; vb = b.gender ?? '' }
+    else if (sortKey === 'level')     { va = (a.level ?? '').toLowerCase(); vb = (b.level ?? '').toLowerCase() }
+    else if (sortKey === 'club')      { va = (a.club ?? '').toLowerCase(); vb = (b.club ?? '').toLowerCase() }
+    else if (sortKey === 'elo')       { va = a.elo ?? 0; vb = b.elo ?? 0 }
+    if (va < vb) return sortDir === 'asc' ? -1 : 1
+    if (va > vb) return sortDir === 'asc' ? 1 : -1
+    return 0
+  })
 
   const toggle = (id: number) => {
     const ids = data.selectedPlayerIds
@@ -215,6 +428,18 @@ function Step2({ data, players, onChange }: {
     }
   }
 
+  // colonnes : [label, sortKey | null, alignRight?]
+  const COLS: [string, SortKey2 | null, boolean?][] = [
+    ['#',       'playerNumber', false],
+    ['Nom',     'lastName',     false],
+    ['Prénom',  'firstName',    false],
+    ['Pseudo',  'pseudo',       false],
+    ['G.',      'gender',       false],
+    ['Niveau',  'level',        false],
+    ['Club',    'club',         false],
+    ['ELO',     'elo',          true],
+  ]
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -226,44 +451,289 @@ function Step2({ data, players, onChange }: {
           {data.selectedPlayerIds.length === activePlayers.length ? 'Désélectionner tout' : 'Sélectionner tout'}
         </button>
       </div>
-      <input type="text" placeholder="Rechercher…" value={search}
+
+      <input type="text" placeholder="Rechercher (nom, club, niveau, ELO…)" value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="bg-bg border border-line hover:border-blue focus:border-blue px-3 py-2
           w-full min-h-[44px] font-sans text-[14px] outline-none placeholder:text-ink-3" />
-      <div className="max-h-72 overflow-y-auto scrollbar-light border-2 border-line">
-        {filtered.map((p, i) => {
-          const selected = data.selectedPlayerIds.includes(p.id)
-          return (
-            <div key={p.id}
-              onClick={() => toggle(p.id)}
-              className={`flex items-center gap-3 px-4 py-3 cursor-pointer border-b border-line-soft
-                transition-colors ${selected ? 'bg-blue/10' : i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}
-                hover:bg-bg-strong`}
+
+      <div className="border-2 border-line overflow-hidden">
+        {/* En-têtes */}
+        <div className="grid bg-ink"
+          style={{ gridTemplateColumns: '32px 40px 1fr 1fr 1fr 40px 90px 1fr 64px' }}>
+          {/* Case à cocher globale */}
+          <div className="flex items-center justify-center px-2 py-2">
+            <div
+              onClick={toggleAll}
+              className={`w-4 h-4 border-2 flex items-center justify-center cursor-pointer shrink-0
+                ${data.selectedPlayerIds.length === activePlayers.length && activePlayers.length > 0
+                  ? 'bg-green-fluo border-green-fluo'
+                  : 'border-green-fluo/40'}`}
             >
-              <div className={`w-4 h-4 border-2 flex items-center justify-center shrink-0
-                ${selected ? 'bg-blue border-blue' : 'border-line'}`}>
-                {selected && <span className="text-white text-[10px] font-bold leading-none">✓</span>}
-              </div>
-              <div className="flex-1">
-                <span className="font-sans font-bold text-[14px] text-ink">{playerDisplayName(p)}</span>
-                <span className="font-mono text-[11px] text-ink-3 ml-2">{p.level}</span>
-              </div>
-              <Tag label={p.gender} color={p.gender === 'M' ? 'H' : 'F'} />
+              {data.selectedPlayerIds.length === activePlayers.length && activePlayers.length > 0 && (
+                <span className="text-ink text-[9px] font-bold leading-none">✓</span>
+              )}
             </div>
-          )
-        })}
-        {filtered.length === 0 && (
-          <p className="px-4 py-6 text-center font-sans text-[14px] text-ink-3">
-            Aucun joueur actif trouvé
-          </p>
-        )}
+          </div>
+          {COLS.map(([label, key, right]) => (
+            key ? (
+              <button key={label} onClick={() => handleSort(key)}
+                className={`flex items-center gap-1 px-2 py-2 text-[10px] font-mono font-bold uppercase tracking-[0.08em]
+                  text-green-fluo hover:text-white transition-colors group ${right ? 'justify-end' : ''}`}
+              >
+                {label}
+                <span className="text-green-fluo/60 group-hover:text-white/60"><SortIcon k={key} /></span>
+              </button>
+            ) : (
+              <span key={label} className="px-2 py-2" />
+            )
+          ))}
+        </div>
+
+        {/* Lignes */}
+        <div className="max-h-[360px] overflow-y-auto scrollbar-light">
+          {sorted.map((p, i) => {
+            const selected = data.selectedPlayerIds.includes(p.id)
+            return (
+              <div key={p.id} onClick={() => toggle(p.id)}
+                className={`grid items-center cursor-pointer border-b border-line-soft transition-colors
+                  hover:bg-bg-strong ${selected ? 'bg-blue/10' : i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}
+                style={{ gridTemplateColumns: '32px 40px 1fr 1fr 1fr 40px 90px 1fr 64px' }}
+              >
+                {/* Checkbox */}
+                <div className="flex items-center justify-center px-2 py-2">
+                  <div className={`w-4 h-4 border-2 flex items-center justify-center shrink-0
+                    ${selected ? 'bg-blue border-blue' : 'border-line'}`}>
+                    {selected && <span className="text-white text-[9px] font-bold leading-none">✓</span>}
+                  </div>
+                </div>
+                {/* # */}
+                <span className="font-mono font-bold text-[12px] text-ink-3 px-2 py-2">
+                  {p.playerNumber != null ? String(p.playerNumber).padStart(2, '0') : '—'}
+                </span>
+                {/* Nom */}
+                <span className="font-sans font-black text-[13px] text-ink uppercase tracking-[-0.01em] px-2 py-2 truncate">
+                  {p.lastName.toUpperCase()}
+                </span>
+                {/* Prénom */}
+                <span className="font-sans text-[13px] text-ink-2 px-2 py-2 truncate">{p.firstName}</span>
+                {/* Pseudo */}
+                <span className="font-mono text-[11px] text-ink-3 px-2 py-2 truncate">
+                  {p.pseudo ? `"${p.pseudo}"` : <span className="opacity-30">—</span>}
+                </span>
+                {/* Genre */}
+                <div className="flex items-center justify-center px-1 py-2">
+                  <Tag label={p.gender === 'M' ? 'H' : 'F'} color={p.gender === 'M' ? 'H' : 'F'} className="w-6 h-6 justify-center px-0 py-0 text-[9px]" />
+                </div>
+                {/* Niveau */}
+                <span className="text-[11px] font-mono font-bold text-ink-2 uppercase px-2 py-2">{p.level ?? '—'}</span>
+                {/* Club */}
+                <span className="font-sans text-[12px] text-ink-2 px-2 py-2 truncate">
+                  {p.club || <span className="text-ink-3">—</span>}
+                </span>
+                {/* ELO */}
+                <span className={`font-mono font-bold text-[14px] text-right px-3 py-2
+                  ${(p.elo ?? 0) >= 1200 ? 'text-blue' : (p.elo ?? 0) >= 1000 ? 'text-ink' : 'text-ink-3'}`}>
+                  {p.elo ?? '—'}
+                </span>
+              </div>
+            )
+          })}
+          {sorted.length === 0 && (
+            <p className="px-4 py-6 text-center font-sans text-[14px] text-ink-3">
+              Aucun joueur actif trouvé
+            </p>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-function Step3({ data, onChange }: { data: WizardData; onChange: (d: Partial<WizardData>) => void }) {
-  const toggleCategory = (cat: MatchCategory) => {
+/** Étape 3 : Mode équipes — activation, noms, et assignation des joueurs */
+function Step3Teams({ data, players, onChange }: {
+  data: WizardData
+  players: ReturnType<typeof usePlayersStore.getState>['players']
+  onChange: (d: Partial<WizardData>) => void
+}) {
+  const selected = players.filter((p) => data.selectedPlayerIds.includes(p.id))
+  const teamLetters = data.teamNames.map((_, idx) => String.fromCharCode(65 + idx))
+
+  const assign = (playerId: number, letter: string | null) => {
+    const updated = { ...data.teamAssignments }
+    if (letter === null) delete updated[playerId]
+    else updated[playerId] = letter
+    onChange({ teamAssignments: updated })
+  }
+
+  const autoAssignByClub = () => {
+    const clubs = Array.from(new Set(selected.map((p) => p.club).filter(Boolean))) as string[]
+    if (clubs.length < 2) return
+    const updated: Record<number, string> = {}
+    for (const p of selected) {
+      const clubIdx = clubs.indexOf(p.club ?? '')
+      if (clubIdx >= 0 && clubIdx < teamLetters.length) updated[p.id] = teamLetters[clubIdx]
+    }
+    onChange({ teamAssignments: updated })
+  }
+
+  const clubs = Array.from(new Set(selected.map((p) => p.club).filter(Boolean)))
+  const counts = teamLetters.map((l) => selected.filter((p) => data.teamAssignments[p.id] === l).length)
+
+  const removeTeam = (idx: number) => {
+    const next = data.teamNames.filter((_, i) => i !== idx)
+    const cutLetter = String.fromCharCode(65 + idx)
+    const newAssign: Record<number, string> = {}
+    for (const [pid, side] of Object.entries(data.teamAssignments)) {
+      if (side < cutLetter) newAssign[Number(pid)] = side
+      else if (side > cutLetter) newAssign[Number(pid)] = String.fromCharCode(side.charCodeAt(0) - 1)
+    }
+    onChange({ teamNames: next, teamAssignments: newAssign })
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Toggle mode équipes */}
+      <div className="border-2 border-line p-4 flex items-center justify-between">
+        <div>
+          <p className="font-sans font-bold text-[14px] text-ink">Mode rencontre par équipes</p>
+          <p className="font-sans text-[12px] text-ink-3 mt-0.5">
+            Activez pour opposer des clubs / équipes. Laissez désactivé pour un tournoi individuel.
+          </p>
+        </div>
+        <button
+          onClick={() => onChange({ teamMode: !data.teamMode })}
+          className={`shrink-0 w-12 h-6 border-2 transition-colors relative ${data.teamMode ? 'bg-ink border-ink' : 'bg-bg border-line'}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 transition-all ${data.teamMode ? 'left-6 bg-green-fluo' : 'left-0.5 bg-ink-3'}`} />
+        </button>
+      </div>
+
+      {!data.teamMode && (
+        <p className="font-sans text-[13px] text-ink-3">
+          Tournoi individuel — pas d'équipes. Cliquez sur Suivant pour continuer.
+        </p>
+      )}
+
+      {data.teamMode && (
+        <>
+          {/* Noms des équipes */}
+          <div className="flex flex-col gap-3">
+            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">Noms des équipes</p>
+            {data.teamNames.map((name, idx) => {
+              const letter = String.fromCharCode(65 + idx)
+              const color = TEAM_COLORS[idx] ?? TEAM_COLORS[TEAM_COLORS.length - 1]
+              return (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="w-7 h-7 flex items-center justify-center font-mono font-bold text-[11px] shrink-0"
+                    style={{ backgroundColor: color.bg, color: color.text }}>
+                    {letter}
+                  </span>
+                  <input type="text" placeholder={`Équipe ${letter}`} value={name}
+                    onChange={(e) => {
+                      const next = [...data.teamNames]
+                      next[idx] = e.target.value
+                      onChange({ teamNames: next })
+                    }}
+                    className="flex-1 bg-bg border border-line hover:border-blue focus:border-blue px-3 py-2
+                      min-h-[36px] font-sans text-[13px] outline-none placeholder:text-ink-3"
+                  />
+                  {data.teamNames.length > 2 && (
+                    <button onClick={() => removeTeam(idx)}
+                      className="w-7 h-7 flex items-center justify-center text-ink-3 hover:text-red border border-line hover:border-red transition-colors shrink-0 text-[14px] font-bold"
+                      title="Supprimer cette équipe">×</button>
+                  )}
+                </div>
+              )
+            })}
+            {data.teamNames.length < 8 && (
+              <button
+                onClick={() => onChange({ teamNames: [...data.teamNames, `Équipe ${String.fromCharCode(65 + data.teamNames.length)}`] })}
+                className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-line-soft hover:border-blue
+                  text-[12px] font-sans font-bold text-ink-3 hover:text-blue transition-colors self-start"
+              >+ Ajouter une équipe</button>
+            )}
+          </div>
+
+          {/* Assignation des joueurs */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">Assignation des joueurs</p>
+              {clubs.length >= 2 && (
+                <button onClick={autoAssignByClub}
+                  className="text-[12px] font-sans font-bold text-blue hover:underline shrink-0">
+                  Assigner par club
+                </button>
+              )}
+            </div>
+
+            {/* Compteurs */}
+            <div className="flex flex-wrap gap-2">
+              {data.teamNames.map((name, idx) => {
+                const letter = teamLetters[idx]
+                const color = TEAM_COLORS[idx] ?? TEAM_COLORS[TEAM_COLORS.length - 1]
+                return (
+                  <span key={idx} className="px-3 py-1 font-mono font-bold text-[11px] uppercase tracking-[0.08em]"
+                    style={{ backgroundColor: color.bg, color: color.text }}>
+                    {name || `Équipe ${letter}`} — {counts[idx]}
+                  </span>
+                )
+              })}
+              <span className="px-3 py-1 border-2 border-line-soft font-mono font-bold text-[11px] uppercase tracking-[0.08em] text-ink-3">
+                Non assigné — {selected.filter((p) => !data.teamAssignments[p.id]).length}
+              </span>
+            </div>
+
+            <div className="border-2 border-line flex flex-col max-h-[340px] overflow-y-auto scrollbar-light">
+              {selected.map((p, i) => {
+                const currentLetter = data.teamAssignments[p.id] ?? null
+                return (
+                  <div key={p.id}
+                    className={`flex items-center gap-3 px-4 py-3 border-b border-line-soft
+                      ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
+                    <Tag label={p.gender === 'M' ? 'H' : 'F'} color={p.gender === 'M' ? 'H' : 'F'} />
+                    <div className="flex-1 min-w-0">
+                      <span className="font-sans font-bold text-[14px] text-ink">{playerDisplayName(p)}</span>
+                      {p.club && <span className="font-mono text-[11px] text-ink-3 ml-2">{p.club}</span>}
+                    </div>
+                    {currentLetter !== null && (
+                      <button onClick={() => assign(p.id, null)}
+                        className="w-7 h-7 flex items-center justify-center text-ink-3 hover:text-red border border-line hover:border-red transition-colors text-[14px] font-bold shrink-0"
+                        title="Retirer de l'équipe">×</button>
+                    )}
+                    <div className="flex gap-1 flex-wrap">
+                      {teamLetters.map((letter, idx) => {
+                        const color = TEAM_COLORS[idx] ?? TEAM_COLORS[TEAM_COLORS.length - 1]
+                        const active = currentLetter === letter
+                        const name = data.teamNames[idx] || `Équipe ${letter}`
+                        return (
+                          <button key={letter} onClick={() => assign(p.id, active ? null : letter)}
+                            title={name}
+                            className="min-w-[36px] h-9 px-2 font-mono font-bold text-[11px] border-2 transition-all"
+                            style={active
+                              ? { backgroundColor: color.bg, color: color.text, borderColor: color.bg }
+                              : { backgroundColor: 'transparent', color: '#8a8a82', borderColor: '#cfcdc4' }
+                            }>{letter}</button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+              {selected.length === 0 && (
+                <p className="px-4 py-6 text-center font-sans text-[14px] text-ink-3">
+                  Aucun joueur sélectionné — retournez à l'étape Joueurs.
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function Step3({ data, onChange }: { data: WizardData; onChange: (d: Partial<WizardData>) => void }) {  const toggleCategory = (cat: MatchCategory) => {
     const cats = data.categories
     onChange({
       categories: cats.includes(cat) ? cats.filter((c) => c !== cat) : [...cats, cat],
@@ -375,6 +845,402 @@ function Step4({ data, rules, onChange }: {
   )
 }
 
+// ─── Helpers paires doubles ──────────────────────────────────────────────────
+
+function eligibleForSlotW(cat: MatchCategory, slot: 0 | 1, players: Player[]): Player[] {
+  if (cat === 'DX') return slot === 0 ? players.filter((p) => p.gender === 'M') : players.filter((p) => p.gender === 'F')
+  if (cat === 'DH') return players.filter((p) => p.gender === 'M')
+  if (cat === 'DD') return players.filter((p) => p.gender === 'F')
+  return players
+}
+
+function buildRandomPairsW(players: Player[], cat: MatchCategory): [number, number][] {
+  if (cat === 'DX') {
+    const males = [...players.filter((p) => p.gender === 'M')].sort(() => Math.random() - 0.5)
+    const females = [...players.filter((p) => p.gender === 'F')].sort(() => Math.random() - 0.5)
+    const count = Math.min(males.length, females.length)
+    return Array.from({ length: count }, (_, i) => [males[i].id, females[i].id])
+  }
+  const eligible = cat === 'DH'
+    ? players.filter((p) => p.gender === 'M')
+    : cat === 'DD' ? players.filter((p) => p.gender === 'F') : players
+  const shuffled = [...eligible].sort(() => Math.random() - 0.5)
+  const pairs: [number, number][] = []
+  for (let i = 0; i + 1 < shuffled.length; i += 2) pairs.push([shuffled[i].id, shuffled[i + 1].id])
+  return pairs
+}
+
+/** Génère des paires en respectant les équipes (interclub) : chaque paire = 2 joueurs de la même équipe. */
+function buildTeamPairsW(
+  players: Player[],
+  cat: MatchCategory,
+  teamAssignments: Record<number, string>,
+  teamNames: string[],
+): [number, number][] {
+  const teamLetters = teamNames.map((_, idx) => String.fromCharCode(65 + idx))
+  const pairs: [number, number][] = []
+  for (const letter of teamLetters) {
+    const teamPlayers = players.filter((p) => teamAssignments[p.id] === letter)
+    if (cat === 'DX') {
+      const men = [...teamPlayers.filter((p) => p.gender === 'M')].sort(() => Math.random() - 0.5)
+      const women = [...teamPlayers.filter((p) => p.gender === 'F')].sort(() => Math.random() - 0.5)
+      const count = Math.min(men.length, women.length)
+      for (let i = 0; i < count; i++) pairs.push([men[i].id, women[i].id])
+    } else {
+      const eligible = eligibleForSlotW(cat, 0, teamPlayers)
+      const shuffled = [...eligible].sort(() => Math.random() - 0.5)
+      for (let i = 0; i + 1 < shuffled.length; i += 2) pairs.push([shuffled[i].id, shuffled[i + 1].id])
+    }
+  }
+  return pairs
+}
+
+// ─── Carte joueur mini (utilisée dans Composition + Bracket) ─────────────────
+
+function PlayerMiniCard({
+  player,
+  selected,
+  dimmed,
+  onSelect,
+  onRemove,
+  placeholder,
+  onClick,
+}: {
+  player?: Player
+  selected?: boolean
+  dimmed?: boolean
+  onSelect?: () => void
+  onRemove?: () => void
+  placeholder?: string
+  onClick?: () => void
+}) {
+  const isH = player?.gender === 'M'
+  const initials = player
+    ? playerDisplayName(player).split(' ').map((w) => w[0] ?? '').join('').toUpperCase().slice(0, 2)
+    : '?'
+
+  if (!player) {
+    return (
+      <button
+        onClick={onClick}
+        className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-line-soft hover:border-blue
+          min-h-[56px] w-full transition-colors text-left"
+      >
+        <div className="w-8 h-8 flex items-center justify-center bg-bg-strong text-ink-3 font-mono font-bold text-[11px] shrink-0">
+          ?
+        </div>
+        <span className="font-sans text-[12px] text-ink-3 italic">
+          {placeholder ?? 'Sélectionner…'}
+        </span>
+      </button>
+    )
+  }
+
+  return (
+    <div
+      onClick={onSelect ?? onClick}
+      className={`relative flex items-center gap-2 px-3 py-2 border-2 min-h-[56px] w-full transition-all
+        ${onSelect || onClick ? 'cursor-pointer' : 'cursor-default'}
+        ${selected ? 'border-blue' : dimmed ? 'border-line-soft opacity-40' : 'border-line hover:border-ink'}`}
+      style={selected ? { backgroundColor: 'rgba(0,71,255,0.06)' } : {}}
+    >
+      {/* Barre genre côté gauche */}
+      <div className="absolute left-0 top-0 bottom-0 w-[3px] shrink-0"
+        style={{ backgroundColor: isH ? '#0047FF' : '#00C24A' }} />
+      {/* Initiales */}
+      <div className="w-8 h-8 flex items-center justify-center font-mono font-black text-[11px] shrink-0 ml-2"
+        style={{ backgroundColor: isH ? '#0047FF' : '#0a0a0a', color: isH ? '#fff' : '#00FF66' }}>
+        {initials}
+      </div>
+      {/* Infos */}
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="font-sans font-bold text-[13px] text-ink truncate leading-tight">
+          {playerDisplayName(player)}
+        </span>
+        {player.club && (
+          <span className="font-mono text-[10px] text-ink-3 truncate">{player.club}</span>
+        )}
+      </div>
+      {/* Tag genre */}
+      <Tag label={isH ? 'H' : 'F'} color={isH ? 'H' : 'F'} />
+      {/* Bouton retirer */}
+      {onRemove && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          className="shrink-0 w-7 h-7 flex items-center justify-center text-ink-3 hover:text-red transition-colors ml-1"
+          title="Retirer"
+        >
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Step 6 — Composition des équipes doubles ────────────────────────────────
+
+function Step6Composition({ data, players, onChange }: {
+  data: WizardData
+  players: Player[]
+  onChange: (d: Partial<WizardData>) => void
+}) {
+  const doublesCats = data.categories.filter((c) => DOUBLES_CATS.includes(c))
+  const [activeTab, setActiveTab] = useState<MatchCategory>(doublesCats[0] ?? 'DX')
+  // ID du joueur sélectionné dans le pool (en attente d'assignation)
+  const [pendingId, setPendingId] = useState<number | null>(null)
+  // Mode de tirage aléatoire : par équipe ou entièrement aléatoire
+  const [pairingMode, setPairingMode] = useState<'random' | 'byTeam'>('random')
+  const participantPlayers = players.filter((p) => data.selectedPlayerIds.includes(p.id))
+
+  const currentPairs = (data.doublesTeams[activeTab] ?? []) as [number, number][]
+
+  const setPairs = (cat: MatchCategory, pairs: [number, number][]) => {
+    onChange({ doublesTeams: { ...data.doublesTeams, [cat]: pairs } })
+    setPendingId(null)
+  }
+
+  const handleShuffle = () => {
+    setPendingId(null)
+    if (pairingMode === 'byTeam' && data.teamMode && data.teamNames.length > 0) {
+      setPairs(activeTab, buildTeamPairsW(participantPlayers, activeTab, data.teamAssignments, data.teamNames))
+    } else {
+      setPairs(activeTab, buildRandomPairsW(participantPlayers, activeTab))
+    }
+  }
+
+  const addEmptyPair = () => {
+    onChange({ doublesTeams: { ...data.doublesTeams, [activeTab]: [...currentPairs, [0, 0]] } })
+  }
+
+  const removePair = (idx: number) => {
+    setPairs(activeTab, currentPairs.filter((_, i) => i !== idx))
+  }
+
+  const removeFromSlot = (pairIdx: number, slot: 0 | 1) => {
+    const updated = [...currentPairs] as [number, number][]
+    updated[pairIdx] = slot === 0 ? [0, updated[pairIdx][1]] : [updated[pairIdx][0], 0]
+    setPairs(activeTab, updated)
+  }
+
+  const assignToSlot = (pairIdx: number, slot: 0 | 1) => {
+    if (!pendingId) return
+    const updated = [...currentPairs] as [number, number][]
+    const old = updated[pairIdx][slot]
+    updated[pairIdx] = slot === 0
+      ? [pendingId, updated[pairIdx][1]]
+      : [updated[pairIdx][0], pendingId]
+    // Si l'ancien occupant était dans une autre case, on ne fait rien (il reste assigné)
+    // Si la même case était déjà prise par ce joueur, déselectionner
+    if (old === pendingId) { setPendingId(null); return }
+    setPairs(activeTab, updated)
+  }
+
+  // IDs assignés dans cette catégorie
+  const assignedIds = new Set(currentPairs.flatMap(([a, b]) => [a, b].filter((x) => x > 0)))
+
+  // Pool par genre pour DX, sinon pool global filtré par genre de la cat
+  const poolFor = (slot: 0 | 1) =>
+    eligibleForSlotW(activeTab, slot, participantPlayers).filter((p) => !assignedIds.has(p.id))
+  const poolMen   = activeTab === 'DX' ? poolFor(0) : []
+  const poolWomen = activeTab === 'DX' ? poolFor(1) : []
+  const poolAll   = activeTab !== 'DX' ? poolFor(0) : []
+
+  const validPairs = currentPairs.filter(([a, b]) => a > 0 && b > 0 && a !== b)
+
+  if (doublesCats.length === 0) {
+    return (
+      <p className="font-sans text-[14px] text-ink-3">
+        Aucune discipline double sélectionnée (DH, DD ou DX). Retournez à l'étape Format.
+      </p>
+    )
+  }
+
+  const slotHint = (slot: 0 | 1) => {
+    if (activeTab === 'DX') return slot === 0 ? 'Joueur (H)' : 'Joueuse (F)'
+    if (activeTab === 'DH') return slot === 0 ? 'Joueur 1 (H)' : 'Joueur 2 (H)'
+    return slot === 0 ? 'Joueuse 1 (F)' : 'Joueuse 2 (F)'
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="font-sans text-[13px] text-ink-3">
+          Constituez les paires. Cliquez sur un joueur, puis sur un slot pour l'assigner.
+        </p>
+        {/* Toggle mode de tirage — affiché uniquement en mode interclub */}
+        {data.teamMode && data.teamNames.length > 0 && (
+          <div className="flex gap-0 border-2 border-line">
+            {(['random', 'byTeam'] as const).map((mode) => (
+              <button key={mode} onClick={() => setPairingMode(mode)}
+                className={`px-3 py-1.5 font-mono font-bold text-[10px] uppercase tracking-[0.08em] transition-colors
+                  ${pairingMode === mode ? 'bg-ink text-green-fluo' : 'bg-bg text-ink-3 hover:text-ink'}`}>
+                {mode === 'random' ? 'Aléatoire' : 'Par équipe'}
+              </button>
+            ))}
+          </div>
+        )}
+        {doublesCats.length > 1 && (
+          <div className="flex gap-0 border-2 border-line">
+            {doublesCats.map((cat) => {
+              const pairs = (data.doublesTeams[cat] ?? []) as [number, number][]
+              const valid = pairs.filter(([a, b]) => a > 0 && b > 0 && a !== b).length
+              return (
+                <button key={cat} onClick={() => { setActiveTab(cat); setPendingId(null) }}
+                  className={`px-4 py-2 font-mono font-bold text-[11px] uppercase tracking-[0.08em] transition-colors
+                    ${activeTab === cat ? 'bg-ink text-green-fluo' : 'bg-bg text-ink-3 hover:text-ink'}`}>
+                  {cat}
+                  {valid > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.5 font-bold text-[9px]"
+                      style={{ backgroundColor: '#00C24A', color: '#fff' }}>{valid}</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Indication genre */}
+      <p className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3 -mt-2">
+        {activeTab === 'DH' && 'Paires Hommes — H + H'}
+        {activeTab === 'DD' && 'Paires Dames — F + F'}
+        {activeTab === 'DX' && 'Mixte — Homme + Femme'}
+        {' '}· {validPairs.length} paire{validPairs.length !== 1 ? 's' : ''} valide{validPairs.length !== 1 ? 's' : ''}
+        {pendingId !== null && (
+          <span className="ml-3 text-blue">
+            · {playerDisplayName(players.find((p) => p.id === pendingId)!)} sélectionné — cliquez un slot
+          </span>
+        )}
+      </p>
+
+      {/* Layout principal : pool gauche + paires droite */}
+      <div className="flex gap-6 items-start">
+
+        {/* ── Pool gauche ── */}
+        <div className="w-[220px] shrink-0 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">
+              Disponibles
+            </span>
+            <button onClick={handleShuffle}
+              className="flex items-center gap-1 px-2 py-1 border border-line hover:border-blue text-[10px]
+                font-mono font-bold uppercase tracking-[0.06em] text-ink hover:text-blue transition-colors">
+              <Shuffle size={10} /> Tirer au sort
+            </button>
+          </div>
+
+          {activeTab === 'DX' ? (
+            /* Pool split H / F pour mixte */
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-blue tracking-[0.06em]">HOMMES</span>
+                {poolMen.length === 0
+                  ? <p className="text-[11px] font-sans text-ink-3 italic px-1">Tous assignés</p>
+                  : poolMen.map((p) => (
+                    <PlayerMiniCard key={p.id} player={p}
+                      selected={pendingId === p.id}
+                      dimmed={false}
+                      onSelect={() => setPendingId(pendingId === p.id ? null : p.id)}
+                    />
+                  ))
+                }
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-mono font-bold tracking-[0.06em]" style={{ color: '#00C24A' }}>FEMMES</span>
+                {poolWomen.length === 0
+                  ? <p className="text-[11px] font-sans text-ink-3 italic px-1">Toutes assignées</p>
+                  : poolWomen.map((p) => (
+                    <PlayerMiniCard key={p.id} player={p}
+                      selected={pendingId === p.id}
+                      onSelect={() => setPendingId(pendingId === p.id ? null : p.id)}
+                    />
+                  ))
+                }
+              </div>
+            </div>
+          ) : (
+            /* Pool unique pour DH / DD */
+            <div className="flex flex-col gap-1.5">
+              {poolAll.length === 0
+                ? <p className="text-[11px] font-sans text-ink-3 italic px-1">Tous assignés</p>
+                : poolAll.map((p) => (
+                  <PlayerMiniCard key={p.id} player={p}
+                    selected={pendingId === p.id}
+                    onSelect={() => setPendingId(pendingId === p.id ? null : p.id)}
+                  />
+                ))
+              }
+            </div>
+          )}
+        </div>
+
+        {/* ── Paires droite ── */}
+        <div className="flex-1 flex flex-col gap-3">
+          <span className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">Paires</span>
+
+          {currentPairs.length === 0 && (
+            <p className="font-sans text-[13px] text-ink-3">
+              Aucune paire. Cliquez sur « Tirer au sort » ou ajoutez une paire manuellement.
+            </p>
+          )}
+
+          {currentPairs.map((pair, pairIdx) => {
+            const playerA = players.find((p) => p.id === pair[0])
+            const playerB = players.find((p) => p.id === pair[1])
+            return (
+              <div key={pairIdx} className="flex items-stretch gap-2">
+                {/* Numéro */}
+                <span className="font-mono text-[11px] text-ink-3 w-5 shrink-0 text-right pt-5">{pairIdx + 1}</span>
+                {/* Slot 0 */}
+                <div className="flex-1">
+                  {playerA
+                    ? <PlayerMiniCard player={playerA}
+                        selected={pendingId !== null}
+                        onRemove={() => removeFromSlot(pairIdx, 0)}
+                        onClick={pendingId !== null ? () => assignToSlot(pairIdx, 0) : undefined}
+                      />
+                    : <PlayerMiniCard placeholder={slotHint(0)}
+                        onClick={() => assignToSlot(pairIdx, 0)}
+                      />
+                  }
+                </div>
+                {/* Séparateur */}
+                <div className="flex items-center shrink-0">
+                  <span className="font-mono font-bold text-[11px] text-ink-3">+</span>
+                </div>
+                {/* Slot 1 */}
+                <div className="flex-1">
+                  {playerB
+                    ? <PlayerMiniCard player={playerB}
+                        selected={pendingId !== null}
+                        onRemove={() => removeFromSlot(pairIdx, 1)}
+                        onClick={pendingId !== null ? () => assignToSlot(pairIdx, 1) : undefined}
+                      />
+                    : <PlayerMiniCard placeholder={slotHint(1)}
+                        onClick={() => assignToSlot(pairIdx, 1)}
+                      />
+                  }
+                </div>
+                {/* Supprimer paire */}
+                <button onClick={() => removePair(pairIdx)}
+                  className="shrink-0 w-8 flex items-center justify-center text-ink-3 hover:text-red transition-colors border-2 border-transparent hover:border-red">
+                  <X size={13} />
+                </button>
+              </div>
+            )
+          })}
+
+          <button onClick={addEmptyPair}
+            className="flex items-center gap-1.5 mt-1 py-2 px-3 border-2 border-dashed border-line-soft hover:border-blue
+              font-sans font-bold text-[12px] text-ink-3 hover:text-blue transition-colors self-start">
+            <Plus size={12} /> Ajouter une paire vide
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Wizard principal ─────────────────────────────────────────────────────────
 
 export function TournamentWizard() {
@@ -385,6 +1251,15 @@ export function TournamentWizard() {
   const [step, setStep] = useState(1)
   const [data, setData] = useState<WizardData>(INITIAL)
   const [saving, setSaving] = useState(false)
+
+  // Step 3 (Équipes) toujours visible — contient le toggle teamMode
+  // Step 6 (Composition) visible uniquement si des catégories doubles sont sélectionnées
+  const hasDoublesCats = data.categories.some((c) => DOUBLES_CATS.includes(c))
+  const STEPS = BASE_STEPS.filter((s) => s.id !== 6 || hasDoublesCats)
+
+  const stepIds = STEPS.map((s) => s.id)
+  const currentStepIdx = stepIds.indexOf(step)
+  const totalSteps = STEPS.length
 
   useEffect(() => {
     void fetchPlayers()
@@ -406,8 +1281,10 @@ export function TournamentWizard() {
   const canNext = () => {
     if (step === 1) return data.name.trim().length > 0
     if (step === 2) return data.selectedPlayerIds.length >= 2
-    if (step === 3) return true
-    if (step === 4) return true
+    if (step === 3) return true  // Équipes — toggle optionnel
+    if (step === 4) return true  // Format
+    if (step === 5) return true  // Règles
+    if (step === 6) return true  // Composition — optionnel
     return false
   }
 
@@ -423,21 +1300,40 @@ export function TournamentWizard() {
         status: 'draft',
         scoringRuleId: data.scoringRuleId ?? undefined,
         categories: data.categories,
+        teamMode: data.teamMode ? 1 : 0,
+        teamAName: data.teamMode ? (data.teamNames[0] ?? undefined) : undefined,
+        teamBName: data.teamMode ? (data.teamNames[1] ?? undefined) : undefined,
+        teamNames: data.teamMode ? data.teamNames : undefined,
       })
-      // Inscrit chaque joueur sélectionné au tournoi
-      await Promise.all(
+      // Inscrit chaque joueur sélectionné au tournoi + teamSide si mode équipes
+      const enrollments = await Promise.all(
         data.selectedPlayerIds.map((playerId) =>
           window.db.addPlayerToTournament(tournament.id, playerId)
         )
       )
-      navigate(`/tournaments/${tournament.id}`)
+      if (data.teamMode) {
+        // enrollments[i] est un TournamentPlayer avec id
+        for (let i = 0; i < data.selectedPlayerIds.length; i++) {
+          const playerId = data.selectedPlayerIds[i]
+          const side = data.teamAssignments[playerId] ?? null
+          const tp = enrollments[i] as { id: number } | null
+          if (tp?.id && side) {
+            await window.db.setPlayerTeamSide(tp.id, side)
+          }
+        }
+      }
+      navigate(`/tournaments/${tournament.id}`, {
+        state: {
+          doublesTeams: data.doublesTeams,
+        },
+      })
     } finally {
       setSaving(false)
     }
   }
 
-  const playerNames = new Map(players.map((p) => [p.id, playerDisplayName(p)]))
-  const ruleName = rules.find((r) => r.id === data.scoringRuleId)?.name ?? ''
+  const selectedPlayers = players.filter((p) => data.selectedPlayerIds.includes(p.id))
+  const selectedRule = rules.find((r) => r.id === data.scoringRuleId)
 
   return (
     <div className="flex h-full">
@@ -449,7 +1345,7 @@ export function TournamentWizard() {
             Nouveau tournoi
           </h1>
           <p className="font-sans text-[14px] text-ink-3 mt-2">
-            Étape {step} sur {STEPS.length} — {STEPS[step - 1].label}
+            Étape {currentStepIdx + 1} sur {totalSteps} — {STEPS[currentStepIdx].label}
           </p>
         </div>
 
@@ -457,8 +1353,8 @@ export function TournamentWizard() {
         <div className="flex items-center gap-0 mb-10">
           {STEPS.map((s, i) => {
             const Icon = s.icon
-            const active = s.id === step
-            const done = s.id < step
+            const active = i === currentStepIdx
+            const done = i < currentStepIdx
             return (
               <div key={s.id} className="flex items-center">
                 <div className={`flex items-center gap-2 px-4 py-2 border-2 transition-colors
@@ -479,24 +1375,29 @@ export function TournamentWizard() {
         </div>
 
         {/* Contenu étape */}
-        <div className="max-w-xl">
+        <div className={step === 6 ? '' : 'max-w-xl'}>
           {step === 1 && <Step1 data={data} onChange={update} />}
           {step === 2 && <Step2 data={data} players={players} onChange={update} />}
-          {step === 3 && <Step3 data={data} onChange={update} />}
-          {step === 4 && <Step4 data={data} rules={rules} onChange={update} />}
+          {step === 3 && <Step3Teams data={data} players={players} onChange={update} />}
+          {step === 4 && <Step3 data={data} onChange={update} />}
+          {step === 5 && <Step4 data={data} rules={rules} onChange={update} />}
+          {step === 6 && <Step6Composition data={data} players={players} onChange={update} />}
         </div>
 
         {/* Navigation */}
         <div className="flex items-center justify-between mt-10 pt-6 border-t-2 border-line max-w-xl">
           <Button variant="secondary"
-            onClick={() => step > 1 ? setStep(step - 1) : navigate('/tournaments')}
+            onClick={() => {
+              if (currentStepIdx > 0) setStep(stepIds[currentStepIdx - 1])
+              else navigate('/tournaments')
+            }}
           >
             <ChevronLeft size={14} className="mr-1 inline" />
-            {step === 1 ? 'Annuler' : 'Retour'}
+            {currentStepIdx === 0 ? 'Annuler' : 'Retour'}
           </Button>
 
-          {step < STEPS.length ? (
-            <Button disabled={!canNext()} onClick={() => setStep(step + 1)}>
+          {currentStepIdx < totalSteps - 1 ? (
+            <Button disabled={!canNext()} onClick={() => setStep(stepIds[currentStepIdx + 1])}>
               Suivant
               <ChevronRight size={14} className="ml-1 inline" />
             </Button>
@@ -510,7 +1411,7 @@ export function TournamentWizard() {
 
       {/* Zone droite 40% — aperçu */}
       <div className="flex-[2] bg-bg-alt sticky top-0 h-full overflow-y-auto scrollbar-light">
-        <TournamentPreview data={data} playerNames={playerNames} ruleName={ruleName} />
+        <TournamentPreview data={data} selectedPlayers={selectedPlayers} selectedRule={selectedRule} />
       </div>
     </div>
   )

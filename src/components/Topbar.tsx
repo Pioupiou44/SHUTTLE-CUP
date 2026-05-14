@@ -24,7 +24,7 @@ export function Topbar() {
   }, [])
 
   return (
-    <header className="flex items-stretch h-12 bg-bg border-b-2 border-line shrink-0">
+    <header className="flex items-stretch h-12 bg-bg border-b-2 border-line shrink-0 print:hidden">
       {/* Logo : carré vert-fluo + fond noir + texte blanc */}
       <div className="flex items-center px-4 border-r-2 border-line shrink-0 gap-3 bg-ink">
         <div className="w-5 h-5 bg-green-fluo shrink-0" />
@@ -75,11 +75,25 @@ export function Topbar() {
         )}
       </nav>
 
-      {/* Zone droite : horloge */}
-      <div className="flex items-center px-4 border-l-2 border-line shrink-0 gap-3">
-        <span className="font-mono font-bold text-[12px] text-ink-2 tracking-[0.05em]">
-          {time}
-        </span>
+      {/* Zone droite : don + horloge */}
+      <div className="flex items-center shrink-0">
+        <a
+          href="https://www.paypal.com/donate/?hosted_button_id=VRGF53EDW2N2A"
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 px-3 h-full border-l-2 border-line
+            font-mono font-bold text-[10px] uppercase tracking-[0.08em]
+            text-green hover:bg-bg-alt transition-colors"
+          title="Soutenir ShuttleCup"
+        >
+          <span>♥</span>
+          <span>Don</span>
+        </a>
+        <div className="flex items-center px-4 border-l-2 border-line h-full gap-3">
+          <span className="font-mono font-bold text-[12px] text-ink-2 tracking-[0.05em]">
+            {time}
+          </span>
+        </div>
       </div>
     </header>
   )

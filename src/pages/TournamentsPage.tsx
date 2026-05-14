@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTournamentsStore } from '@/store/tournamentsStore'
 import { Button, Badge, Modal } from '@/components/ui'
-import { Plus, Trash2, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, ChevronRight, Archive } from 'lucide-react'
 import type { Tournament } from '@/types/domain'
 
 const STATUS_LABELS: Record<Tournament['status'], string> = {
@@ -31,8 +31,9 @@ const FORMAT_SHORT: Record<string, string> = {
 
 export function TournamentsPage() {
   const navigate = useNavigate()
-  const { tournaments, isLoading, fetchTournaments, deleteTournament } = useTournamentsStore()
+  const { tournaments, isLoading, fetchTournaments, deleteTournament, updateTournament } = useTournamentsStore()
   const [deleteTarget, setDeleteTarget] = useState<Tournament | null>(null)
+  const [archiveTarget, setArchiveTarget] = useState<Tournament | null>(null)
   const [filter, setFilter] = useState<Tournament['status'] | 'all'>('all')
 
   useEffect(() => { void fetchTournaments() }, [fetchTournaments])
@@ -43,6 +44,10 @@ export function TournamentsPage() {
 
   const handleDelete = async () => {
     if (deleteTarget) { await deleteTournament(deleteTarget.id); setDeleteTarget(null) }
+  }
+
+  const handleArchive = async () => {
+    if (archiveTarget) { await updateTournament(archiveTarget.id, { status: 'archived' }); setArchiveTarget(null) }
   }
 
   return (
@@ -114,6 +119,17 @@ export function TournamentsPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {t.status === 'completed' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setArchiveTarget(t) }}
+                    className="p-2 text-ink-3 hover:text-ink transition-colors min-h-[44px] min-w-[44px]
+                      flex items-center justify-center opacity-0 group-hover:opacity-100"
+                    aria-label="Archiver"
+                    title="Archiver le tournoi"
+                  >
+                    <Archive size={14} />
+                  </button>
+                )}
                 {t.status === 'draft' && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setDeleteTarget(t) }}
@@ -146,6 +162,24 @@ export function TournamentsPage() {
       >
         <p className="font-sans text-[14px] text-ink">
           Supprimer <strong>{deleteTarget?.name}</strong> ? Cette action est irréversible.
+        </p>
+      </Modal>
+
+      {/* Confirmation archivage */}
+      <Modal
+        isOpen={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        title="Archiver le tournoi"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setArchiveTarget(null)}>Annuler</Button>
+            <Button size="sm" onClick={handleArchive}>Archiver</Button>
+          </>
+        }
+      >
+        <p className="font-sans text-[14px] text-ink">
+          Archiver <strong>{archiveTarget?.name}</strong> ? Le tournoi sera conservé en lecture seule.
         </p>
       </Modal>
     </div>

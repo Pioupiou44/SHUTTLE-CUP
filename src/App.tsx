@@ -9,12 +9,13 @@ import { TournamentWizard } from './pages/TournamentWizard'
 import { TournamentDetail } from './pages/TournamentDetail'
 import { RefereeView } from './pages/RefereeView'
 import { SettingsPage } from './pages/SettingsPage'
+import { PrintView } from './pages/PrintView'
 
 const DevUI = lazy(() => import('./pages/DevUI').then((m) => ({ default: m.DevUI })))
 
 export function App() {
   return (
-    <HashRouter>
+    <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="flex flex-col w-full h-full">
         <Topbar />
         <main className="flex-1 overflow-y-auto scrollbar-light bg-bg flex flex-col">
@@ -28,6 +29,7 @@ export function App() {
               path="/tournaments/:id/match/:matchId"
               element={<RefereeView />}
             />
+            <Route path="/tournaments/:id/print" element={<PrintView />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route
               path="/dev-ui"

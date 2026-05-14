@@ -27,6 +27,8 @@ const dbApi = {
     ipcRenderer.invoke('db:addPlayerToTournament', tournamentId, playerId, seed),
   removePlayerFromTournament: (tournamentPlayerId: number) =>
     ipcRenderer.invoke('db:removePlayerFromTournament', tournamentPlayerId),
+  setPlayerTeamSide: (tournamentPlayerId: number, side: string | null) =>
+    ipcRenderer.invoke('db:setPlayerTeamSide', tournamentPlayerId, side),
 
   // Matchs
   getMatches: (tournamentId: number) => ipcRenderer.invoke('db:getMatches', tournamentId),
@@ -36,11 +38,21 @@ const dbApi = {
   setMatchScore: (matchId: number, setNumber: number, scoreA: number, scoreB: number) =>
     ipcRenderer.invoke('db:setMatchScore', matchId, setNumber, scoreA, scoreB),
   getMatchScores: (matchId: number) => ipcRenderer.invoke('db:getMatchScores', matchId),
+  createMatchWithTeams: (match: unknown) => ipcRenderer.invoke('db:createMatchWithTeams', match),
   createPlaceholderMatch: (match: unknown) => ipcRenderer.invoke('db:createPlaceholderMatch', match),
   advanceWinner: (tournamentId: number, completedMatchId: number, winnerPlayerId: number) =>
     ipcRenderer.invoke('db:advanceWinner', tournamentId, completedMatchId, winnerPlayerId),
+  seedKnockoutMatches: (seeds: unknown[]) =>
+    ipcRenderer.invoke('db:seedKnockoutMatches', seeds),
+
+  // Réorganisation
+  swapMatchSides: (matchId1: number, side1: 'A' | 'B', matchId2: number, side2: 'A' | 'B') =>
+    ipcRenderer.invoke('db:swapMatchSides', matchId1, side1, matchId2, side2),
+  clearTournamentMatches: (tournamentId: number) =>
+    ipcRenderer.invoke('db:clearTournamentMatches', tournamentId),
 
   // Admin / dev
+  seedTestPlayers: () => ipcRenderer.invoke('db:seedTestPlayers'),
   clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
 }
 

@@ -306,6 +306,44 @@ export function SettingsPage() {
             )}
           </div>
         )}
+
+        {/* À propos */}
+        <div className="mt-16 pt-8 border-t-2 border-line">
+          <h2 className="font-sans font-black uppercase text-[13px] tracking-[0.08em] text-ink-3 mb-6">
+            À propos
+          </h2>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-baseline justify-between">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Application</span>
+              <span className="font-sans font-bold text-[14px] text-ink">ShuttleCup</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Version</span>
+              <span className="font-sans text-[14px] text-ink">0.1.0</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Licence</span>
+              <span className="font-sans text-[14px] text-ink">GNU AGPL v3</span>
+            </div>
+            <div className="h-px bg-line-soft" />
+            <div className="flex items-baseline justify-between">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Auteur</span>
+              <span className="font-sans font-bold text-[14px] text-ink">Alexis Priou</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Site</span>
+              <span className="font-sans text-[14px] text-blue">alexisandcom.fr</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Contact</span>
+              <span className="font-sans text-[14px] text-blue">contact@alexisandcom.fr</span>
+            </div>
+            <div className="h-px bg-line-soft" />
+            <p className="font-sans text-[12px] text-ink-3">
+              © 2026 Alexis Priou — Logiciel libre distribué sous licence GNU Affero General Public License v3.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Zone droite 40% — aperçu live */}

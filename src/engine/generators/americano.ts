@@ -73,7 +73,7 @@ function shuffleWithConstraints(players: number[], used: Set<string>): number[] 
   }
   // Tentative de réarranger par groupes de 4 pour éviter partenariats déjà joués
   for (let start = 0; start < players.length - 3; start += 4) {
-    const [a, b, c, d] = players.slice(start, start + 4)
+    const [a, b, c] = players.slice(start, start + 4)
     // Si le partenariat A-B a déjà été joué, essaie A-C
     if (used.has(pairKey(a, b)) && !used.has(pairKey(a, c))) {
       players[start + 1] = c

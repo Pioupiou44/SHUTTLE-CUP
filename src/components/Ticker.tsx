@@ -25,7 +25,7 @@ export function Ticker() {
   ])
 
   return (
-    <footer className="flex items-center h-[30px] bg-ink border-t border-line shrink-0 overflow-hidden">
+    <footer className="flex items-center h-[30px] bg-ink border-t border-line shrink-0 overflow-hidden print:hidden">
       {/* Badge fixe */}
       <div className="flex items-center px-3 h-full bg-ink shrink-0 border-r border-line">
         <span className="text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-green-fluo">
