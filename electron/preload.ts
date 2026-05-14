@@ -30,10 +30,18 @@ const dbApi = {
 
   // Matchs
   getMatches: (tournamentId: number) => ipcRenderer.invoke('db:getMatches', tournamentId),
+  createMatch: (match: unknown) => ipcRenderer.invoke('db:createMatch', match),
   updateMatchStatus: (matchId: number, status: string, winnerId?: number) =>
     ipcRenderer.invoke('db:updateMatchStatus', matchId, status, winnerId),
   setMatchScore: (matchId: number, setNumber: number, scoreA: number, scoreB: number) =>
     ipcRenderer.invoke('db:setMatchScore', matchId, setNumber, scoreA, scoreB),
+  getMatchScores: (matchId: number) => ipcRenderer.invoke('db:getMatchScores', matchId),
+  createPlaceholderMatch: (match: unknown) => ipcRenderer.invoke('db:createPlaceholderMatch', match),
+  advanceWinner: (tournamentId: number, completedMatchId: number, winnerPlayerId: number) =>
+    ipcRenderer.invoke('db:advanceWinner', tournamentId, completedMatchId, winnerPlayerId),
+
+  // Admin / dev
+  clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
 }
 
 contextBridge.exposeInMainWorld('db', dbApi)

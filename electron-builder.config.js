@@ -1,8 +1,8 @@
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
-  appId: 'com.shuttledesk.app',
-  productName: 'ShuttleDesk',
-  copyright: 'ShuttleDesk — Open Source',
+  appId: 'com.shuttlecup.app',
+  productName: 'ShuttleCup',
+  copyright: 'ShuttleCup — Open Source',
 
   directories: {
     output: 'release',
@@ -41,10 +41,10 @@ module.exports = {
   },
 
   msix: {
-    applicationId: 'ShuttleDesk',
-    publisher: 'CN=ShuttleDesk',
-    publisherDisplayName: 'ShuttleDesk',
-    identityName: 'com.shuttledesk.app',
+    applicationId: 'ShuttleCup',
+    publisher: 'CN=ShuttleCup',
+    publisherDisplayName: 'ShuttleCup',
+    identityName: 'com.shuttlecup.app',
   },
 
   nsis: {

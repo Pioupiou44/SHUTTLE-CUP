@@ -33,13 +33,13 @@ function StatCard({
   accent?: boolean
 }) {
   return (
-    <div className="bg-mid-grey border-l-4 border-electric-blue p-5 flex items-center gap-4">
-      <div className={`p-2 ${accent ? 'text-fluo-green' : 'text-electric-blue'}`}>
+    <div className="bg-bg border-l-4 border-line p-5 flex items-center gap-4">
+      <div className={`p-2 ${accent ? 'text-green' : 'text-blue'}`}>
         <Icon size={32} strokeWidth={1.5} />
       </div>
       <div>
-        <p className="font-sans text-light-grey/60 text-xs uppercase tracking-widest">{label}</p>
-        <p className="font-condensed font-bold text-3xl text-white leading-none mt-1">{value}</p>
+        <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">{label}</p>
+        <p className="font-sans font-black text-[42px] tracking-[-0.03em] text-ink leading-none mt-1">{value}</p>
       </div>
     </div>
   )
@@ -62,10 +62,10 @@ export function Dashboard() {
     <div className="p-8 max-w-5xl">
       {/* En-tête */}
       <div className="mb-8">
-        <h1 className="font-condensed font-bold uppercase text-4xl text-white tracking-widest leading-none">
-          ShuttleDesk
+        <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+          Accueil
         </h1>
-        <p className="font-sans text-light-grey/50 text-sm mt-1">
+        <p className="font-sans text-[14px] text-ink-3 mt-1">
           Gestionnaire de tournois de badminton
         </p>
       </div>
@@ -78,9 +78,9 @@ export function Dashboard() {
       </div>
 
       {/* Tournois récents */}
-      <div className="bg-mid-grey mb-6">
+      <div className="bg-bg border-2 border-line mb-6">
         <div className="flex items-center justify-between px-6 py-4 border-b border-electric-blue/30">
-          <h2 className="font-condensed font-bold uppercase text-lg text-electric-blue tracking-wide">
+          <h2 className="font-sans font-black uppercase text-[13px] tracking-[0.05em] text-ink">
             Tournois récents
           </h2>
           <Button
@@ -93,16 +93,16 @@ export function Dashboard() {
         </div>
 
         {isLoading ? (
-          <div className="px-6 py-8 text-center text-light-grey/40 font-sans text-sm">
+          <div className="px-6 py-8 text-center text-[14px] font-sans text-ink-3">
             Chargement…
           </div>
         ) : recentTournaments.length === 0 ? (
           <div className="px-6 py-12 text-center">
             <Trophy size={48} className="text-electric-blue/20 mx-auto mb-4" />
-            <p className="font-condensed font-bold uppercase text-xl text-light-grey/40 mb-2">
+            <p className="font-sans font-black uppercase text-[18px] text-ink-3 mb-2">
               Aucun tournoi
             </p>
-            <p className="font-sans text-light-grey/30 text-sm mb-6">
+            <p className="font-sans text-[14px] text-ink-3 mb-6">
               Créez votre premier tournoi pour commencer
             </p>
             <Button onClick={() => navigate('/tournaments')}>
@@ -114,14 +114,14 @@ export function Dashboard() {
             {recentTournaments.map((tournament) => (
               <div
                 key={tournament.id}
-                className="flex items-center justify-between px-6 py-4 border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors group"
+                className="flex items-center justify-between px-6 py-4 border-b border-line-soft hover:bg-bg-alt cursor-pointer transition-colors group"
                 onClick={() => navigate(`/tournaments/${tournament.id}`)}
               >
                 <div>
-                  <p className="font-condensed font-bold text-lg text-white group-hover:text-electric-blue transition-colors">
+                  <p className="font-sans font-bold text-[15px] text-ink group-hover:text-blue transition-colors">
                     {tournament.name}
                   </p>
-                  <p className="font-sans text-xs text-light-grey/40 mt-0.5">
+                  <p className="font-sans text-[12px] text-ink-3 mt-0.5">
                     {formatDate(tournament.date)}
                     {tournament.location && ` · ${tournament.location}`}
                   </p>
@@ -130,7 +130,7 @@ export function Dashboard() {
                   <Badge variant={STATUS_VARIANTS[tournament.status]}>
                     {STATUS_LABELS[tournament.status]}
                   </Badge>
-                  <ChevronRight size={16} className="text-light-grey/20 group-hover:text-electric-blue transition-colors" />
+                  <ChevronRight size={16} className="text-ink-3 group-hover:text-blue transition-colors" />
                 </div>
               </div>
             ))}
@@ -142,26 +142,26 @@ export function Dashboard() {
       <div className="grid grid-cols-2 gap-4">
         <button
           onClick={() => navigate('/players')}
-          className="bg-dark-navy border border-electric-blue/20 hover:border-electric-blue p-5 text-left transition-colors group"
+          className="bg-bg border-2 border-line hover:border-blue p-5 text-left transition-colors group"
         >
-          <Users size={24} className="text-electric-blue mb-3" strokeWidth={1.5} />
-          <p className="font-condensed font-bold uppercase text-base text-white group-hover:text-electric-blue transition-colors">
+          <Users size={24} className="text-blue mb-3" strokeWidth={1.5} />
+          <p className="font-sans font-black uppercase text-[13px] tracking-[0.05em] text-ink group-hover:text-blue transition-colors">
             Gérer les joueurs
           </p>
-          <p className="font-sans text-xs text-light-grey/40 mt-1">
+          <p className="font-sans text-[12px] text-ink-3 mt-1">
             {players.length} joueur{players.length !== 1 ? 's' : ''} enregistré{players.length !== 1 ? 's' : ''}
           </p>
         </button>
 
         <button
           onClick={() => navigate('/tournaments')}
-          className="bg-dark-navy border border-electric-blue/20 hover:border-electric-blue p-5 text-left transition-colors group"
+          className="bg-bg border-2 border-line hover:border-blue p-5 text-left transition-colors group"
         >
-          <Trophy size={24} className="text-electric-blue mb-3" strokeWidth={1.5} />
-          <p className="font-condensed font-bold uppercase text-base text-white group-hover:text-electric-blue transition-colors">
+          <Trophy size={24} className="text-blue mb-3" strokeWidth={1.5} />
+          <p className="font-sans font-black uppercase text-[13px] tracking-[0.05em] text-ink group-hover:text-blue transition-colors">
             Nouveau tournoi
           </p>
-          <p className="font-sans text-xs text-light-grey/40 mt-1">
+          <p className="font-sans text-[12px] text-ink-3 mt-1">
             Organiser un tournoi en 4 étapes simples
           </p>
         </button>

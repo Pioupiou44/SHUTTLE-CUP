@@ -5,6 +5,7 @@ import {
   tournamentQueries,
   tournamentPlayerQueries,
   matchQueries,
+  adminQueries,
 } from './queries'
 
 export function registerDbHandlers(ipcMain: IpcMain): void {
@@ -39,10 +40,19 @@ export function registerDbHandlers(ipcMain: IpcMain): void {
 
   // Matchs
   ipcMain.handle('db:getMatches', (_event, tournamentId) => matchQueries.getAll(tournamentId))
+  ipcMain.handle('db:createMatch', (_event, match) => matchQueries.create(match))
   ipcMain.handle('db:updateMatchStatus', (_event, matchId, status, winnerId) =>
     matchQueries.updateStatus(matchId, status, winnerId)
   )
   ipcMain.handle('db:setMatchScore', (_event, matchId, setNumber, scoreA, scoreB) =>
     matchQueries.setScore(matchId, setNumber, scoreA, scoreB)
   )
+  ipcMain.handle('db:getMatchScores', (_event, matchId) => matchQueries.getScores(matchId))
+  ipcMain.handle('db:createPlaceholderMatch', (_event, match) => matchQueries.createPlaceholder(match))
+  ipcMain.handle('db:advanceWinner', (_event, tournamentId, completedMatchId, winnerPlayerId) =>
+    matchQueries.advanceWinner(tournamentId, completedMatchId, winnerPlayerId)
+  )
+
+  // Admin / dev
+  ipcMain.handle('db:clearAllData', () => adminQueries.clearAllData())
 }

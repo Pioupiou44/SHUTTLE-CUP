@@ -2,17 +2,18 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
+import { runMigrations } from './migrations/runner'
 
 let db: Database.Database
 
 export function initDb(): void {
   const userDataPath = app.getPath('userData')
-  const dbPath = path.join(userDataPath, 'shuttledesk.db')
+  const dbPath = path.join(userDataPath, 'shuttlecup.db')
 
   // Chemin du schéma : relatif à __dirname en dev, dans resourcesPath en prod
   const schemaPath = app.isPackaged
     ? path.join(process.resourcesPath, 'db', 'schema.sql')
-    : path.join(__dirname, 'schema.sql')
+    : path.join(__dirname, '../electron/db/schema.sql')
 
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
@@ -20,7 +21,7 @@ export function initDb(): void {
 
   const schema = fs.readFileSync(schemaPath, 'utf-8')
   db.exec(schema)
-
+  runMigrations(db)
   console.log('Base de données initialisée:', dbPath)
 }
 
@@ -119,9 +120,16 @@ export const scoringRuleQueries = {
 
 // --- Tournois ---
 
+function parseTournament(row: Record<string, unknown>): Record<string, unknown> {
+  let categories: string[] = []
+  try { categories = JSON.parse((row.categories as string | null) ?? '[]') } catch { /* vide */ }
+  return { ...row, categories }
+}
+
 export const tournamentQueries = {
   getAll(): unknown[] {
     return getDb().prepare('SELECT * FROM tournaments ORDER BY date DESC').all()
+      .map((r) => parseTournament(r as Record<string, unknown>))
   },
 
   create(t: {
@@ -132,26 +140,33 @@ export const tournamentQueries = {
     logoPath?: string
     format: string
     scoringRuleId?: number
+    categories?: string[]
   }): unknown {
     const stmt = getDb().prepare(
-      'INSERT INTO tournaments (name, date, location, courtCount, logoPath, format, scoringRuleId) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO tournaments (name, date, location, courtCount, logoPath, format, scoringRuleId, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
     const result = stmt.run(
       t.name, t.date, t.location ?? null, t.courtCount ?? 4,
-      t.logoPath ?? null, t.format, t.scoringRuleId ?? null
+      t.logoPath ?? null, t.format, t.scoringRuleId ?? null,
+      JSON.stringify(t.categories ?? [])
     )
-    return getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(result.lastInsertRowid)
+    const row = getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(result.lastInsertRowid)
+    return parseTournament(row as Record<string, unknown>)
   },
 
   update(id: number, data: Record<string, unknown>): unknown {
-    const allowed = ['name', 'date', 'location', 'courtCount', 'logoPath', 'format', 'status', 'scoringRuleId']
+    const allowed = ['name', 'date', 'location', 'courtCount', 'logoPath', 'format', 'status', 'scoringRuleId', 'categories']
     const fields = Object.keys(data).filter((k) => allowed.includes(k))
-    if (fields.length === 0) return getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(id)
+    if (fields.length === 0) {
+      const row = getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(id)
+      return parseTournament(row as Record<string, unknown>)
+    }
 
     const setClause = fields.map((f) => `${f} = ?`).join(', ')
-    const values = fields.map((f) => data[f])
+    const values = fields.map((f) => f === 'categories' ? JSON.stringify(data[f]) : data[f])
     getDb().prepare(`UPDATE tournaments SET ${setClause} WHERE id = ?`).run(...values, id)
-    return getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(id)
+    const row = getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(id)
+    return parseTournament(row as Record<string, unknown>)
   },
 
   delete(id: number): void {
@@ -189,10 +204,11 @@ export const tournamentPlayerQueries = {
 
 export const matchQueries = {
   getAll(tournamentId: number): unknown[] {
+    // Retourne les IDs joueurs dans teamA/teamB pour que l'engine puisse les identifier
     return getDb().prepare(`
       SELECT m.*,
-        GROUP_CONCAT(CASE WHEN mp.side='A' THEN p.firstName || ' ' || p.lastName END) as teamA,
-        GROUP_CONCAT(CASE WHEN mp.side='B' THEN p.firstName || ' ' || p.lastName END) as teamB
+        GROUP_CONCAT(CASE WHEN mp.side='A' THEN CAST(p.id AS TEXT) END) as teamA,
+        GROUP_CONCAT(CASE WHEN mp.side='B' THEN CAST(p.id AS TEXT) END) as teamB
       FROM matches m
       LEFT JOIN match_participants mp ON mp.matchId = m.id
       LEFT JOIN tournament_players tp ON tp.id = mp.tournamentPlayerId
@@ -201,6 +217,38 @@ export const matchQueries = {
       GROUP BY m.id
       ORDER BY m.round, m.id
     `).all(tournamentId)
+  },
+
+  create(match: {
+    tournamentId: number
+    round?: number
+    courtNumber?: number
+    playerAId: number
+    playerBId: number
+    category?: string
+  }): unknown {
+    // Insère le match
+    const matchResult = getDb()
+      .prepare('INSERT INTO matches (tournamentId, round, courtNumber, status, category) VALUES (?, ?, ?, ?, ?)')
+      .run(match.tournamentId, match.round ?? null, match.courtNumber ?? null, 'pending', match.category ?? null)
+    const matchId = matchResult.lastInsertRowid as number
+
+    // Retrouve les tournament_player IDs
+    const tpA = getDb()
+      .prepare('SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?')
+      .get(match.tournamentId, match.playerAId) as { id: number } | undefined
+    const tpB = getDb()
+      .prepare('SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?')
+      .get(match.tournamentId, match.playerBId) as { id: number } | undefined
+
+    if (tpA && tpB) {
+      getDb().prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+        .run(matchId, 'A', tpA.id)
+      getDb().prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
+        .run(matchId, 'B', tpB.id)
+    }
+
+    return getDb().prepare('SELECT * FROM matches WHERE id = ?').get(matchId)
   },
 
   updateStatus(matchId: number, status: string, winnerId?: number): void {
@@ -221,6 +269,84 @@ export const matchQueries = {
     return getDb()
       .prepare('SELECT * FROM match_scores WHERE matchId = ? ORDER BY setNumber')
       .all(matchId)
+  },
+
+  /** Crée un match placeholder sans participants (bracket rounds futurs). */
+  createPlaceholder(match: {
+    tournamentId: number
+    round?: number
+    courtNumber?: number
+    comment?: string
+    category?: string
+  }): unknown {
+    const result = getDb()
+      .prepare('INSERT INTO matches (tournamentId, round, courtNumber, status, comment, category) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(match.tournamentId, match.round ?? null, match.courtNumber ?? null, 'pending', match.comment ?? null, match.category ?? null)
+    return getDb().prepare('SELECT * FROM matches WHERE id = ?').get(result.lastInsertRowid)
+  },
+
+  /**
+   * Avance le gagnant d'un match dans le prochain match du bracket.
+   * Trouve la position du match terminé dans sa ronde, puis localise le
+   * match cible en ronde+1 (floor(pos/2)) et y insère le joueur gagnant.
+   */
+  advanceWinner(tournamentId: number, completedMatchId: number, winnerPlayerId: number): void {
+    const db = getDb()
+    const match = db.prepare('SELECT round FROM matches WHERE id = ?').get(completedMatchId) as { round: number } | undefined
+    if (!match) return
+
+    const roundMatches = db.prepare(
+      'SELECT id FROM matches WHERE tournamentId = ? AND round = ? ORDER BY id'
+    ).all(tournamentId, match.round) as { id: number }[]
+
+    const position = roundMatches.findIndex((m) => m.id === completedMatchId)
+    if (position === -1) return
+
+    const nextRound = match.round + 1
+    const nextMatches = db.prepare(
+      'SELECT id FROM matches WHERE tournamentId = ? AND round = ? ORDER BY id'
+    ).all(tournamentId, nextRound) as { id: number }[]
+
+    const targetMatch = nextMatches[Math.floor(position / 2)]
+    if (!targetMatch) return
+
+    const side = position % 2 === 0 ? 'A' : 'B'
+
+    const tp = db.prepare(
+      'SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?'
+    ).get(tournamentId, winnerPlayerId) as { id: number } | undefined
+    if (!tp) return
+
+    const existing = db.prepare(
+      'SELECT id FROM match_participants WHERE matchId = ? AND side = ?'
+    ).get(targetMatch.id, side) as { id: number } | undefined
+
+    if (existing) {
+      db.prepare('UPDATE match_participants SET tournamentPlayerId = ? WHERE id = ?').run(tp.id, existing.id)
+    } else {
+      db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)').run(targetMatch.id, side, tp.id)
+    }
+  },
+}
+
+// --- Admin ---
+
+export const adminQueries = {
+  /** Supprime toutes les données utilisateur (joueurs, tournois, matchs, scores). */
+  clearAllData(): void {
+    const db = getDb()
+    db.transaction(() => {
+      db.prepare('DELETE FROM match_scores').run()
+      db.prepare('DELETE FROM match_participants').run()
+      db.prepare('DELETE FROM matches').run()
+      db.prepare('DELETE FROM tournament_players').run()
+      db.prepare('DELETE FROM tournaments').run()
+      db.prepare('DELETE FROM players').run()
+      // Réinitialise les auto-incréments
+      db.prepare(
+        "DELETE FROM sqlite_sequence WHERE name IN ('match_scores','match_participants','matches','tournament_players','tournaments','players')"
+      ).run()
+    })()
   },
 }
 

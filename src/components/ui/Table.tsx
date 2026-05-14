@@ -25,7 +25,7 @@ export function Table<T>({
   emptyMessage = 'Aucune donnée',
 }: TableProps<T>) {
   return (
-    <div className={cn('w-full overflow-x-auto scrollbar-dark', className)}>
+    <div className={cn('w-full overflow-x-auto scrollbar-light', className)}>
       <table className="w-full border-collapse">
         <thead>
           <tr>
@@ -33,7 +33,9 @@ export function Table<T>({
               <th
                 key={col.key}
                 className={cn(
-                  'bg-electric-blue text-white font-condensed font-bold uppercase text-sm px-4 py-3',
+                  'bg-ink text-green-fluo',
+                  'text-[11px] font-mono font-bold uppercase tracking-[0.08em]',
+                  'px-4 py-3',
                   col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'
                 )}
                 style={col.width ? { width: col.width } : undefined}
@@ -48,7 +50,7 @@ export function Table<T>({
             <tr>
               <td
                 colSpan={columns.length}
-                className="px-4 py-6 text-center text-sm font-sans text-light-grey/50 bg-dark-navy"
+                className="px-4 py-6 text-center text-[14px] font-sans text-ink-3 bg-bg"
               >
                 {emptyMessage}
               </td>
@@ -58,15 +60,16 @@ export function Table<T>({
               <tr
                 key={keyExtractor(row)}
                 className={cn(
-                  'transition-colors duration-100 hover:bg-electric-blue/10',
-                  index % 2 === 0 ? 'bg-dark-navy' : 'bg-mid-grey'
+                  'transition-colors duration-100 hover:bg-bg-strong',
+                  index % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'
                 )}
               >
                 {columns.map((col) => (
                   <td
                     key={col.key}
                     className={cn(
-                      'px-4 py-3 text-sm font-sans text-white',
+                      'px-4 py-3 text-[14px] font-sans text-ink',
+                      'border-b border-line-soft',
                       col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'
                     )}
                   >

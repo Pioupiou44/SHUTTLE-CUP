@@ -33,7 +33,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer }:
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Overlay */}
       <div
-        className="absolute inset-0 bg-black/75"
+        className="absolute inset-0 bg-ink/60"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -41,7 +41,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer }:
       {/* Contenu */}
       <div
         className={cn(
-          'relative z-10 w-full mx-4 bg-mid-grey border border-electric-blue',
+          'relative z-10 w-full mx-4 bg-bg border-2 border-line',
           sizeClasses[size]
         )}
         role="dialog"
@@ -49,13 +49,16 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer }:
         aria-labelledby="modal-title"
       >
         {/* En-tête */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-electric-blue">
-          <h2 id="modal-title" className="font-condensed font-bold uppercase text-lg text-white tracking-wide">
+        <div className="flex items-center justify-between px-6 py-4 border-b-2 border-line">
+          <h2
+            id="modal-title"
+            className="font-sans font-black uppercase text-[18px] tracking-[-0.01em] text-ink"
+          >
             {title}
           </h2>
           <button
             onClick={onClose}
-            className="text-light-grey/60 hover:text-red-alert transition-colors p-1"
+            className="text-ink-3 hover:text-red transition-colors p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
             aria-label="Fermer"
             type="button"
           >
@@ -68,7 +71,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer }:
 
         {/* Pied (optionnel) */}
         {footer && (
-          <div className="px-6 py-4 border-t border-electric-blue/30 flex justify-end gap-3">
+          <div className="px-6 py-4 border-t border-line-soft flex justify-end gap-3">
             {footer}
           </div>
         )}

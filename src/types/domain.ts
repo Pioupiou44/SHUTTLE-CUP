@@ -3,6 +3,7 @@
 export type Gender = 'M' | 'F' | 'X'
 export type PlayerStatus = 'active' | 'inactive'
 export type TournamentPlayerStatus = 'active' | 'withdrawn' | 'forfeit'
+export type MatchCategory = 'SH' | 'SD' | 'DH' | 'DD' | 'DX'
 export type TournamentFormat =
   | 'round-robin'
   | 'knockout'
@@ -46,6 +47,7 @@ export interface Tournament {
   format: TournamentFormat
   status: TournamentStatus
   scoringRuleId?: number
+  categories: MatchCategory[]
   createdAt: string
 }
 
@@ -74,6 +76,7 @@ export interface Match {
   comment?: string
   teamA?: string
   teamB?: string
+  category?: MatchCategory
 }
 
 export interface MatchScore {
@@ -87,6 +90,15 @@ export interface MatchScore {
 // Nom d'affichage d'un joueur (prénom + nom ou pseudo)
 export function playerDisplayName(p: Pick<Player, 'firstName' | 'lastName' | 'pseudo'>): string {
   return p.pseudo || `${p.firstName} ${p.lastName}`
+}
+
+// Libellés lisibles des catégories de match
+export const CATEGORY_LABELS: Record<MatchCategory, string> = {
+  SH: 'Simple Hommes',
+  SD: 'Simple Dames',
+  DH: 'Double Hommes',
+  DD: 'Double Dames',
+  DX: 'Double Mixte',
 }
 
 // Libellé lisible d'un format de tournoi

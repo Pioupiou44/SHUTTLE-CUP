@@ -4,6 +4,8 @@ import type {
   Tournament,
   TournamentPlayer,
   Match,
+  MatchScore,
+  MatchCategory,
 } from './domain'
 
 // Interface typée du pont IPC exposé via contextBridge
@@ -33,8 +35,15 @@ export interface DbApi {
 
   // Matchs
   getMatches: (tournamentId: number) => Promise<Match[]>
+  createMatch: (match: { tournamentId: number; round?: number; courtNumber?: number; playerAId: number; playerBId: number; category?: MatchCategory }) => Promise<Match>
   updateMatchStatus: (matchId: number, status: string, winnerId?: number) => Promise<void>
   setMatchScore: (matchId: number, setNumber: number, scoreA: number, scoreB: number) => Promise<void>
+  getMatchScores: (matchId: number) => Promise<MatchScore[]>
+  createPlaceholderMatch: (match: { tournamentId: number; round?: number; courtNumber?: number; comment?: string; category?: MatchCategory }) => Promise<Match>
+  advanceWinner: (tournamentId: number, completedMatchId: number, winnerPlayerId: number) => Promise<void>
+
+  // Admin / dev
+  clearAllData: () => Promise<void>
 }
 
 // Déclaration globale pour TypeScript — window.db est disponible après preload

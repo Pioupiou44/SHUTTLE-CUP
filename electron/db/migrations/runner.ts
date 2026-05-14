@@ -14,7 +14,7 @@ export function runMigrations(db: Database.Database): void {
 
   const migrationsDir = app.isPackaged
     ? path.join(process.resourcesPath, 'db', 'migrations')
-    : path.join(__dirname)
+    : path.join(__dirname, '../electron/db/migrations')
 
   if (!fs.existsSync(migrationsDir)) return
 

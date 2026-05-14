@@ -32,35 +32,27 @@
 }
 
 @font-face {
-  font-family: 'Barlow Condensed';
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-  src: url('/fonts/BarlowCondensed-Regular.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Barlow Condensed';
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-  src: url('/fonts/BarlowCondensed-Bold.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Barlow Condensed';
+  font-family: 'Inter';
   font-weight: 800;
   font-style: normal;
   font-display: swap;
-  src: url('/fonts/BarlowCondensed-ExtraBold.woff2') format('woff2');
+  src: url('/fonts/Inter-ExtraBold.woff2') format('woff2');
 }
 
 @font-face {
-  font-family: 'Barlow Condensed';
+  font-family: 'Inter';
   font-weight: 900;
   font-style: normal;
   font-display: swap;
-  src: url('/fonts/BarlowCondensed-Black.woff2') format('woff2');
+  src: url('/fonts/Inter-Black.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Bold.woff2') format('woff2');
 }
 
 @tailwind base;
@@ -68,39 +60,71 @@
 @tailwind utilities;
 
 @layer base {
+  /* ── Design tokens CSS ──────────────────────────────────────── */
+  :root {
+    --color-bg:          #fafaf7;
+    --color-bg-alt:      #f1efe9;
+    --color-bg-strong:   #e6e3da;
+    --color-ink:         #0a0a0a;
+    --color-ink-2:       #4a4a4a;
+    --color-ink-3:       #8a8a82;
+    --color-line:        #1a1a1a;
+    --color-line-soft:   #cfcdc4;
+    --color-blue:        #0047FF;
+    --color-green:       #00C24A;
+    --color-green-fluo:  #00FF66;
+    --color-warn:        #D97500;
+    --color-red:         #E60022;
+  }
+
   * {
     box-sizing: border-box;
   }
 
   body {
-    @apply bg-dark-navy text-white font-sans;
+    background-color: var(--color-bg);
+    color: var(--color-ink);
+    font-family: 'Inter', system-ui, sans-serif;
     margin: 0;
     padding: 0;
-    overflow: hidden;
+    overflow: hidden; /* Le scroll est géré par <main> ou les sous-panneaux */
   }
 
   #root {
     height: 100vh;
     display: flex;
+    flex-direction: column;
+  }
+
+  /* Focus ring global — 2px bleu électrique */
+  :focus-visible {
+    outline: 2px solid var(--color-blue);
+    outline-offset: 2px;
   }
 }
 
-/* Scrollbar sombre pour correspondre au thème */
+/* Scrollbar assortie au thème clair */
 @layer utilities {
-  .scrollbar-dark {
+  .scrollbar-light {
     scrollbar-width: thin;
-    scrollbar-color: #0047FF #000A1F;
+    scrollbar-color: var(--color-line-soft) var(--color-bg-alt);
   }
 
-  .scrollbar-dark::-webkit-scrollbar {
+  .scrollbar-light::-webkit-scrollbar {
     width: 6px;
   }
 
-  .scrollbar-dark::-webkit-scrollbar-track {
-    background: #000A1F;
+  .scrollbar-light::-webkit-scrollbar-track {
+    background: var(--color-bg-alt);
   }
 
-  .scrollbar-dark::-webkit-scrollbar-thumb {
-    background-color: #0047FF;
+  .scrollbar-light::-webkit-scrollbar-thumb {
+    background-color: var(--color-line-soft);
+  }
+
+  /* Alias obsolète conservé pour compatibilité */
+  .scrollbar-dark {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-soft) var(--color-bg-alt);
   }
 }
