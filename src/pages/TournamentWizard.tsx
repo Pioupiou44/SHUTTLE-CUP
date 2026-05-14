@@ -572,9 +572,16 @@ function Step3Teams({ data, players, onChange }: {
     const updated: Record<number, string> = {}
     for (const p of selected) {
       const clubIdx = clubs.indexOf(p.club ?? '')
-      if (clubIdx >= 0 && clubIdx < teamLetters.length) updated[p.id] = teamLetters[clubIdx]
+      // Utilise clubs.length (pas teamLetters.length) car les équipes sont créées dans le même appel
+      if (clubIdx >= 0 && clubIdx < 8) updated[p.id] = String.fromCharCode(65 + clubIdx)
     }
-    onChange({ teamAssignments: updated })
+    // Met à jour les noms d'équipes avec les noms de clubs
+    const updatedNames = clubs.slice(0, 8).map((club, i) => club || data.teamNames[i] || `Équipe ${String.fromCharCode(65 + i)}`)
+    // S'assure d'avoir autant d'entrées que teamNames actuel (au minimum 2)
+    while (updatedNames.length < Math.max(2, data.teamNames.length)) {
+      updatedNames.push(`Équipe ${String.fromCharCode(65 + updatedNames.length)}`)
+    }
+    onChange({ teamAssignments: updated, teamNames: updatedNames })
   }
 
   const clubs = Array.from(new Set(selected.map((p) => p.club).filter(Boolean)))
@@ -760,8 +767,8 @@ function Step3({ data, onChange }: { data: WizardData; onChange: (d: Partial<Wiz
         ))}
       </div>
 
-      {/* Nombre de groupes (pool+knockout uniquement) */}
-      {data.format === 'pool+knockout' && (
+      {/* Nombre de groupes (pool+knockout uniquement et hors mode équipes) */}
+      {data.format === 'pool+knockout' && !data.teamMode && (
         <div>
           <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
             Nombre de groupes
@@ -905,6 +912,7 @@ function PlayerMiniCard({
   onRemove,
   placeholder,
   onClick,
+  teamColor,
 }: {
   player?: Player
   selected?: boolean
@@ -913,6 +921,8 @@ function PlayerMiniCard({
   onRemove?: () => void
   placeholder?: string
   onClick?: () => void
+  /** Couleur d'équipe — remplace la barre genre si définie (mode interclub) */
+  teamColor?: { bg: string; text: string }
 }) {
   const isH = player?.gender === 'M'
   const initials = player
@@ -942,14 +952,18 @@ function PlayerMiniCard({
       className={`relative flex items-center gap-2 px-3 py-2 border-2 min-h-[56px] w-full transition-all
         ${onSelect || onClick ? 'cursor-pointer' : 'cursor-default'}
         ${selected ? 'border-blue' : dimmed ? 'border-line-soft opacity-40' : 'border-line hover:border-ink'}`}
-      style={selected ? { backgroundColor: 'rgba(0,71,255,0.06)' } : {}}
+      style={teamColor
+        ? { backgroundColor: teamColor.bg + '33' }
+        : selected ? { backgroundColor: 'rgba(0,71,255,0.06)' } : {}}
     >
-      {/* Barre genre côté gauche */}
+      {/* Barre couleur côté gauche : équipe si teamColor, sinon genre */}
       <div className="absolute left-0 top-0 bottom-0 w-[3px] shrink-0"
-        style={{ backgroundColor: isH ? '#0047FF' : '#00C24A' }} />
+        style={{ backgroundColor: teamColor ? teamColor.bg : (isH ? '#0047FF' : '#00C24A') }} />
       {/* Initiales */}
       <div className="w-8 h-8 flex items-center justify-center font-mono font-black text-[11px] shrink-0 ml-2"
-        style={{ backgroundColor: isH ? '#0047FF' : '#0a0a0a', color: isH ? '#fff' : '#00FF66' }}>
+        style={teamColor
+          ? { backgroundColor: teamColor.bg, color: teamColor.text }
+          : { backgroundColor: isH ? '#0047FF' : '#0a0a0a', color: isH ? '#fff' : '#00FF66' }}>
         {initials}
       </div>
       {/* Infos */}
@@ -986,21 +1000,26 @@ function Step6Composition({ data, players, onChange }: {
 }) {
   const doublesCats = data.categories.filter((c) => DOUBLES_CATS.includes(c))
   const [activeTab, setActiveTab] = useState<MatchCategory>(doublesCats[0] ?? 'DX')
-  // ID du joueur sélectionné dans le pool (en attente d'assignation)
-  const [pendingId, setPendingId] = useState<number | null>(null)
   // Mode de tirage aléatoire : par équipe ou entièrement aléatoire
   const [pairingMode, setPairingMode] = useState<'random' | 'byTeam'>('random')
   const participantPlayers = players.filter((p) => data.selectedPlayerIds.includes(p.id))
 
   const currentPairs = (data.doublesTeams[activeTab] ?? []) as [number, number][]
 
+  // Couleur d'équipe pour un joueur (mode interclub uniquement)
+  const getTeamColor = (playerId: number): { bg: string; text: string } | undefined => {
+    if (!data.teamMode) return undefined
+    const letter = data.teamAssignments[playerId]
+    if (!letter) return undefined
+    const idx = letter.charCodeAt(0) - 65
+    return TEAM_COLORS[idx] ?? TEAM_COLORS[TEAM_COLORS.length - 1]
+  }
+
   const setPairs = (cat: MatchCategory, pairs: [number, number][]) => {
     onChange({ doublesTeams: { ...data.doublesTeams, [cat]: pairs } })
-    setPendingId(null)
   }
 
   const handleShuffle = () => {
-    setPendingId(null)
     if (pairingMode === 'byTeam' && data.teamMode && data.teamNames.length > 0) {
       setPairs(activeTab, buildTeamPairsW(participantPlayers, activeTab, data.teamAssignments, data.teamNames))
     } else {
@@ -1017,23 +1036,57 @@ function Step6Composition({ data, players, onChange }: {
   }
 
   const removeFromSlot = (pairIdx: number, slot: 0 | 1) => {
-    const updated = [...currentPairs] as [number, number][]
+    const updated = currentPairs.map((p) => [...p]) as [number, number][]
     updated[pairIdx] = slot === 0 ? [0, updated[pairIdx][1]] : [updated[pairIdx][0], 0]
     setPairs(activeTab, updated)
   }
 
-  const assignToSlot = (pairIdx: number, slot: 0 | 1) => {
-    if (!pendingId) return
-    const updated = [...currentPairs] as [number, number][]
-    const old = updated[pairIdx][slot]
-    updated[pairIdx] = slot === 0
-      ? [pendingId, updated[pairIdx][1]]
-      : [updated[pairIdx][0], pendingId]
-    // Si l'ancien occupant était dans une autre case, on ne fait rien (il reste assigné)
-    // Si la même case était déjà prise par ce joueur, déselectionner
-    if (old === pendingId) { setPendingId(null); return }
-    setPairs(activeTab, updated)
+  // ── Drag & Drop ──────────────────────────────────────────────────────────────
+  type DragSource = 'pool' | { pairIdx: number; slot: 0 | 1 }
+  type DragOverTarget = { pairIdx: number; slot: 0 | 1 } | 'pool' | null
+
+  const [dragging, setDragging] = useState<{ id: number; source: DragSource } | null>(null)
+  const [dragOver, setDragOver] = useState<DragOverTarget>(null)
+
+  const handleDragStart = (e: React.DragEvent, id: number, source: DragSource) => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(id))
+    setDragging({ id, source })
   }
+
+  const handleDropOnSlot = (e: React.DragEvent, pairIdx: number, slot: 0 | 1) => {
+    e.preventDefault()
+    if (!dragging) return
+    const updated = currentPairs.map((p) => [...p]) as [number, number][]
+    const prevOccupant = updated[pairIdx][slot]
+    // Place le joueur dragué dans le slot cible
+    if (slot === 0) updated[pairIdx][0] = dragging.id
+    else updated[pairIdx][1] = dragging.id
+    // Si la source était un slot, y place l'ancien occupant (échange)
+    if (dragging.source !== 'pool') {
+      const { pairIdx: srcIdx, slot: srcSlot } = dragging.source
+      // Évite l'auto-échange sur le même slot
+      if (srcIdx !== pairIdx || srcSlot !== slot) {
+        if (srcSlot === 0) updated[srcIdx][0] = prevOccupant
+        else updated[srcIdx][1] = prevOccupant
+      }
+    }
+    setPairs(activeTab, updated)
+    setDragging(null)
+    setDragOver(null)
+  }
+
+  const handleDropOnPool = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (!dragging || dragging.source === 'pool') return
+    removeFromSlot(dragging.source.pairIdx, dragging.source.slot)
+    setDragging(null)
+    setDragOver(null)
+  }
+
+  const isSlotTarget = (pairIdx: number, slot: 0 | 1): boolean =>
+    typeof dragOver === 'object' && dragOver !== null &&
+    dragOver.pairIdx === pairIdx && dragOver.slot === slot
 
   // IDs assignés dans cette catégorie
   const assignedIds = new Set(currentPairs.flatMap(([a, b]) => [a, b].filter((x) => x > 0)))
@@ -1063,29 +1116,38 @@ function Step6Composition({ data, players, onChange }: {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* ── Barre d'outils : description + toggle + onglets catégories + tirage ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="font-sans text-[13px] text-ink-3">
-          Constituez les paires. Cliquez sur un joueur, puis sur un slot pour l'assigner.
+          Constituez les paires par glisser-déposer.
         </p>
-        {/* Toggle mode de tirage — affiché uniquement en mode interclub */}
-        {data.teamMode && data.teamNames.length > 0 && (
-          <div className="flex gap-0 border-2 border-line">
-            {(['random', 'byTeam'] as const).map((mode) => (
-              <button key={mode} onClick={() => setPairingMode(mode)}
-                className={`px-3 py-1.5 font-mono font-bold text-[10px] uppercase tracking-[0.08em] transition-colors
-                  ${pairingMode === mode ? 'bg-ink text-green-fluo' : 'bg-bg text-ink-3 hover:text-ink'}`}>
-                {mode === 'random' ? 'Aléatoire' : 'Par équipe'}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Toggle mode de tirage — affiché uniquement en mode interclub */}
+          {data.teamMode && data.teamNames.length > 0 && (
+            <div className="flex gap-0 border-2 border-line">
+              {(['random', 'byTeam'] as const).map((mode) => (
+                <button key={mode} onClick={() => setPairingMode(mode)}
+                  className={`px-3 py-1.5 font-mono font-bold text-[10px] uppercase tracking-[0.08em] transition-colors
+                    ${pairingMode === mode ? 'bg-ink text-green-fluo' : 'bg-bg text-ink-3 hover:text-ink'}`}>
+                  {mode === 'random' ? 'Aléatoire' : 'Par équipe'}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Bouton tirage au sort — déplacé ici sous le toggle */}
+          <button onClick={handleShuffle}
+            className="flex items-center gap-1.5 px-3 py-1.5 border-2 border-line hover:border-blue text-[10px]
+              font-mono font-bold uppercase tracking-[0.06em] text-ink hover:text-blue transition-colors min-h-[36px]">
+            <Shuffle size={11} /> Tirer au sort
+          </button>
+        </div>
         {doublesCats.length > 1 && (
           <div className="flex gap-0 border-2 border-line">
             {doublesCats.map((cat) => {
               const pairs = (data.doublesTeams[cat] ?? []) as [number, number][]
               const valid = pairs.filter(([a, b]) => a > 0 && b > 0 && a !== b).length
               return (
-                <button key={cat} onClick={() => { setActiveTab(cat); setPendingId(null) }}
+                <button key={cat} onClick={() => setActiveTab(cat)}
                   className={`px-4 py-2 font-mono font-bold text-[11px] uppercase tracking-[0.08em] transition-colors
                     ${activeTab === cat ? 'bg-ink text-green-fluo' : 'bg-bg text-ink-3 hover:text-ink'}`}>
                   {cat}
@@ -1100,34 +1162,28 @@ function Step6Composition({ data, players, onChange }: {
         )}
       </div>
 
-      {/* Indication genre */}
+      {/* Indication genre + compteur */}
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3 -mt-2">
         {activeTab === 'DH' && 'Paires Hommes — H + H'}
         {activeTab === 'DD' && 'Paires Dames — F + F'}
         {activeTab === 'DX' && 'Mixte — Homme + Femme'}
         {' '}· {validPairs.length} paire{validPairs.length !== 1 ? 's' : ''} valide{validPairs.length !== 1 ? 's' : ''}
-        {pendingId !== null && (
-          <span className="ml-3 text-blue">
-            · {playerDisplayName(players.find((p) => p.id === pendingId)!)} sélectionné — cliquez un slot
-          </span>
-        )}
       </p>
 
-      {/* Layout principal : pool gauche + paires droite */}
+      {/* ── Layout principal : pool gauche + paires droite ── */}
       <div className="flex gap-6 items-start">
 
-        {/* ── Pool gauche ── */}
-        <div className="w-[220px] shrink-0 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">
-              Disponibles
-            </span>
-            <button onClick={handleShuffle}
-              className="flex items-center gap-1 px-2 py-1 border border-line hover:border-blue text-[10px]
-                font-mono font-bold uppercase tracking-[0.06em] text-ink hover:text-blue transition-colors">
-              <Shuffle size={10} /> Tirer au sort
-            </button>
-          </div>
+        {/* Pool gauche — zone de dépôt pour retirer un joueur d'une paire */}
+        <div
+          className={`w-[220px] shrink-0 flex flex-col gap-3 p-2 transition-colors
+            ${dragOver === 'pool' ? 'bg-bg-alt outline outline-2 outline-dashed outline-line-soft' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); setDragOver('pool') }}
+          onDragLeave={() => setDragOver(null)}
+          onDrop={handleDropOnPool}
+        >
+          <span className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">
+            Disponibles
+          </span>
 
           {activeTab === 'DX' ? (
             /* Pool split H / F pour mixte */
@@ -1137,11 +1193,14 @@ function Step6Composition({ data, players, onChange }: {
                 {poolMen.length === 0
                   ? <p className="text-[11px] font-sans text-ink-3 italic px-1">Tous assignés</p>
                   : poolMen.map((p) => (
-                    <PlayerMiniCard key={p.id} player={p}
-                      selected={pendingId === p.id}
-                      dimmed={false}
-                      onSelect={() => setPendingId(pendingId === p.id ? null : p.id)}
-                    />
+                    <div key={p.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, p.id, 'pool')}
+                      onDragEnd={() => { setDragging(null); setDragOver(null) }}
+                      className="cursor-grab active:cursor-grabbing"
+                    >
+                      <PlayerMiniCard player={p} teamColor={getTeamColor(p.id)} />
+                    </div>
                   ))
                 }
               </div>
@@ -1150,10 +1209,14 @@ function Step6Composition({ data, players, onChange }: {
                 {poolWomen.length === 0
                   ? <p className="text-[11px] font-sans text-ink-3 italic px-1">Toutes assignées</p>
                   : poolWomen.map((p) => (
-                    <PlayerMiniCard key={p.id} player={p}
-                      selected={pendingId === p.id}
-                      onSelect={() => setPendingId(pendingId === p.id ? null : p.id)}
-                    />
+                    <div key={p.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, p.id, 'pool')}
+                      onDragEnd={() => { setDragging(null); setDragOver(null) }}
+                      className="cursor-grab active:cursor-grabbing"
+                    >
+                      <PlayerMiniCard player={p} teamColor={getTeamColor(p.id)} />
+                    </div>
                   ))
                 }
               </div>
@@ -1164,10 +1227,14 @@ function Step6Composition({ data, players, onChange }: {
               {poolAll.length === 0
                 ? <p className="text-[11px] font-sans text-ink-3 italic px-1">Tous assignés</p>
                 : poolAll.map((p) => (
-                  <PlayerMiniCard key={p.id} player={p}
-                    selected={pendingId === p.id}
-                    onSelect={() => setPendingId(pendingId === p.id ? null : p.id)}
-                  />
+                  <div key={p.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, p.id, 'pool')}
+                    onDragEnd={() => { setDragging(null); setDragOver(null) }}
+                    className="cursor-grab active:cursor-grabbing"
+                  >
+                    <PlayerMiniCard player={p} teamColor={getTeamColor(p.id)} />
+                  </div>
                 ))
               }
             </div>
@@ -1191,36 +1258,60 @@ function Step6Composition({ data, players, onChange }: {
               <div key={pairIdx} className="flex items-stretch gap-2">
                 {/* Numéro */}
                 <span className="font-mono text-[11px] text-ink-3 w-5 shrink-0 text-right pt-5">{pairIdx + 1}</span>
-                {/* Slot 0 */}
-                <div className="flex-1">
-                  {playerA
-                    ? <PlayerMiniCard player={playerA}
-                        selected={pendingId !== null}
+
+                {/* Slot 0 — zone de dépôt */}
+                <div className="flex-1"
+                  onDragOver={(e) => { e.preventDefault(); setDragOver({ pairIdx, slot: 0 }) }}
+                  onDragLeave={() => setDragOver(null)}
+                  onDrop={(e) => handleDropOnSlot(e, pairIdx, 0)}
+                  style={isSlotTarget(pairIdx, 0) ? { outline: '2px solid #0047FF', outlineOffset: '1px' } : {}}
+                >
+                  {playerA ? (
+                    <div
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, playerA.id, { pairIdx, slot: 0 })}
+                      onDragEnd={() => { setDragging(null); setDragOver(null) }}
+                      className="cursor-grab active:cursor-grabbing"
+                    >
+                      <PlayerMiniCard player={playerA}
                         onRemove={() => removeFromSlot(pairIdx, 0)}
-                        onClick={pendingId !== null ? () => assignToSlot(pairIdx, 0) : undefined}
+                        teamColor={getTeamColor(playerA.id)}
                       />
-                    : <PlayerMiniCard placeholder={slotHint(0)}
-                        onClick={() => assignToSlot(pairIdx, 0)}
-                      />
-                  }
+                    </div>
+                  ) : (
+                    <PlayerMiniCard placeholder={slotHint(0)} />
+                  )}
                 </div>
+
                 {/* Séparateur */}
                 <div className="flex items-center shrink-0">
                   <span className="font-mono font-bold text-[11px] text-ink-3">+</span>
                 </div>
-                {/* Slot 1 */}
-                <div className="flex-1">
-                  {playerB
-                    ? <PlayerMiniCard player={playerB}
-                        selected={pendingId !== null}
+
+                {/* Slot 1 — zone de dépôt */}
+                <div className="flex-1"
+                  onDragOver={(e) => { e.preventDefault(); setDragOver({ pairIdx, slot: 1 }) }}
+                  onDragLeave={() => setDragOver(null)}
+                  onDrop={(e) => handleDropOnSlot(e, pairIdx, 1)}
+                  style={isSlotTarget(pairIdx, 1) ? { outline: '2px solid #0047FF', outlineOffset: '1px' } : {}}
+                >
+                  {playerB ? (
+                    <div
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, playerB.id, { pairIdx, slot: 1 })}
+                      onDragEnd={() => { setDragging(null); setDragOver(null) }}
+                      className="cursor-grab active:cursor-grabbing"
+                    >
+                      <PlayerMiniCard player={playerB}
                         onRemove={() => removeFromSlot(pairIdx, 1)}
-                        onClick={pendingId !== null ? () => assignToSlot(pairIdx, 1) : undefined}
+                        teamColor={getTeamColor(playerB.id)}
                       />
-                    : <PlayerMiniCard placeholder={slotHint(1)}
-                        onClick={() => assignToSlot(pairIdx, 1)}
-                      />
-                  }
+                    </div>
+                  ) : (
+                    <PlayerMiniCard placeholder={slotHint(1)} />
+                  )}
                 </div>
+
                 {/* Supprimer paire */}
                 <button onClick={() => removePair(pairIdx)}
                   className="shrink-0 w-8 flex items-center justify-center text-ink-3 hover:text-red transition-colors border-2 border-transparent hover:border-red">
@@ -1296,6 +1387,8 @@ export function TournamentWizard() {
         date: data.date,
         location: data.location || undefined,
         courtCount: data.courtCount,
+        // En mode équipes, le nombre de groupes = nombre d'équipes
+        poolCount: data.teamMode ? data.teamNames.length : data.poolCount,
         format: data.format,
         status: 'draft',
         scoringRuleId: data.scoringRuleId ?? undefined,
@@ -1325,6 +1418,7 @@ export function TournamentWizard() {
       navigate(`/tournaments/${tournament.id}`, {
         state: {
           doublesTeams: data.doublesTeams,
+          autoGenerate: true,
         },
       })
     } finally {

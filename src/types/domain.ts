@@ -48,6 +48,7 @@ export interface Tournament {
   date: string
   location?: string
   courtCount: number
+  poolCount: number
   logoPath?: string
   format: TournamentFormat
   status: TournamentStatus

@@ -155,7 +155,7 @@ function parseTournament(row: Record<string, unknown>): Record<string, unknown> 
   if (row.teamNames) {
     try { teamNames = JSON.parse(row.teamNames as string) } catch { /* vide */ }
   }
-  return { ...row, categories, teamNames }
+  return { ...row, categories, teamNames, poolCount: (row.poolCount as number | null) ?? 2 }
 }
 
 export const tournamentQueries = {
@@ -169,6 +169,7 @@ export const tournamentQueries = {
     date: string
     location?: string
     courtCount?: number
+    poolCount?: number
     logoPath?: string
     format: string
     scoringRuleId?: number
@@ -179,10 +180,11 @@ export const tournamentQueries = {
     teamNames?: string[]
   }): unknown {
     const stmt = getDb().prepare(
-      'INSERT INTO tournaments (name, date, location, courtCount, logoPath, format, scoringRuleId, categories, teamMode, teamAName, teamBName, teamNames) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO tournaments (name, date, location, courtCount, poolCount, logoPath, format, scoringRuleId, categories, teamMode, teamAName, teamBName, teamNames) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
     const result = stmt.run(
       t.name, t.date, t.location ?? null, t.courtCount ?? 4,
+      t.poolCount ?? 2,
       t.logoPath ?? null, t.format, t.scoringRuleId ?? null,
       JSON.stringify(t.categories ?? []),
       t.teamMode ?? 0, t.teamAName ?? null, t.teamBName ?? null,
@@ -193,7 +195,7 @@ export const tournamentQueries = {
   },
 
   update(id: number, data: Record<string, unknown>): unknown {
-    const allowed = ['name', 'date', 'location', 'courtCount', 'logoPath', 'format', 'status', 'scoringRuleId', 'categories', 'teamMode', 'teamAName', 'teamBName', 'teamNames']
+    const allowed = ['name', 'date', 'location', 'courtCount', 'poolCount', 'logoPath', 'format', 'status', 'scoringRuleId', 'categories', 'teamMode', 'teamAName', 'teamBName', 'teamNames']
     const fields = Object.keys(data).filter((k) => allowed.includes(k))
     if (fields.length === 0) {
       const row = getDb().prepare('SELECT * FROM tournaments WHERE id = ?').get(id)

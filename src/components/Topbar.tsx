@@ -25,9 +25,9 @@ export function Topbar() {
 
   return (
     <header className="flex items-stretch h-12 bg-bg border-b-2 border-line shrink-0 print:hidden">
-      {/* Logo : carré vert-fluo + fond noir + texte blanc */}
+      {/* Logo : icône + texte */}
       <div className="flex items-center px-4 border-r-2 border-line shrink-0 gap-3 bg-ink">
-        <div className="w-5 h-5 bg-green-fluo shrink-0" />
+        <img src="/fonts/logo.png" alt="ShuttleCup" className="w-6 h-6 shrink-0 object-contain" />
         <span className="font-sans font-black uppercase text-[15px] tracking-[0.06em] text-white leading-none">
           SHUTTLE/CUP
         </span>

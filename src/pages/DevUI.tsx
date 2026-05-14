@@ -368,7 +368,18 @@ export function DevUI() {
       {/* Outils dev */}
       <Section title="Outils de développement">
         <Subsection title="Base de données">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <Button onClick={async () => {
+              await window.db.seedTestPlayers()
+              window.location.reload()
+            }}>
+              Charger les joueurs de test
+            </Button>
+            <span className="font-sans text-[13px] text-ink-3">
+              Insère 16 joueurs fictifs (9H, 7F, 4 clubs). Sans effet si des joueurs existent déjà.
+            </span>
+          </div>
+          <div className="flex items-center gap-4 mt-4">
             <Button variant="danger" onClick={() => setResetModalOpen(true)}>
               Réinitialiser les données
             </Button>
