@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import logoSrc from '../../public/fonts/logo.png'
 
 interface NavItem {
   to: string
@@ -27,7 +28,7 @@ export function Topbar() {
     <header className="flex items-stretch h-12 bg-bg border-b-2 border-line shrink-0 print:hidden">
       {/* Logo : icône + texte */}
       <div className="flex items-center px-4 border-r-2 border-line shrink-0 gap-3 bg-ink">
-        <img src="/fonts/logo.png" alt="ShuttleCup" className="w-6 h-6 shrink-0 object-contain" />
+        <img src={logoSrc} alt="ShuttleCup" className="w-6 h-6 shrink-0 object-contain" />
         <span className="font-sans font-black uppercase text-[15px] tracking-[0.06em] text-white leading-none">
           SHUTTLE/CUP
         </span>

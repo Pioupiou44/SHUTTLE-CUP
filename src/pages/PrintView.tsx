@@ -7,6 +7,7 @@ import { playerDisplayName, CATEGORY_LABELS } from '@/types/domain'
 import { computeStandings } from '@/engine/standings'
 import { Printer, ArrowLeft } from 'lucide-react'
 import type { Match, MatchScore, ScoringRule, TournamentFormat } from '@/types/domain'
+import logoSrc from '../../public/fonts/logo.png'
 
 // ─── Labels courts des formats ────────────────────────────────────────────────
 const FORMAT_SHORT: Record<TournamentFormat, string> = {
@@ -38,7 +39,7 @@ function PageHeader({ tournamentName, dateStr }: { tournamentName: string; dateS
   return (
     <div className="flex items-center justify-between pb-3 mb-6 border-b-2 border-line">
       <div className="flex items-center gap-3">
-        <img src="/fonts/logo.png" alt="ShuttleCup" className="w-5 h-5 object-contain" />
+        <img src={logoSrc} alt="ShuttleCup" className="w-5 h-5 object-contain" />
         <span className="font-black uppercase text-[12px] tracking-[0.06em] text-ink leading-none">
           SHUTTLE/CUP
         </span>
@@ -234,7 +235,7 @@ export function PrintView() {
         {/* En-tête ShuttleCup */}
         <div className="flex items-start justify-between mb-10 print:mb-8">
           <div className="flex items-center gap-3">
-            <img src="/fonts/logo.png" alt="ShuttleCup" className="w-10 h-10 object-contain shrink-0" />
+            <img src={logoSrc} alt="ShuttleCup" className="w-10 h-10 object-contain shrink-0" />
             <div>
               <div className="font-black uppercase text-[18px] tracking-[0.06em] text-ink leading-none">
                 SHUTTLE/CUP
