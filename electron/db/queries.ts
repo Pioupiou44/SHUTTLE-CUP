@@ -320,11 +320,12 @@ export const matchQueries = {
     playerAId: number
     playerBId: number
     category?: string
+    comment?: string
   }): unknown {
     // Insère le match
     const matchResult = getDb()
-      .prepare('INSERT INTO matches (tournamentId, round, courtNumber, status, category) VALUES (?, ?, ?, ?, ?)')
-      .run(match.tournamentId, match.round ?? null, match.courtNumber ?? null, 'pending', match.category ?? null)
+      .prepare('INSERT INTO matches (tournamentId, round, courtNumber, status, category, comment) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(match.tournamentId, match.round ?? null, match.courtNumber ?? null, 'pending', match.category ?? null, match.comment ?? null)
     const matchId = matchResult.lastInsertRowid as number
 
     // Retrouve les tournament_player IDs
@@ -353,11 +354,12 @@ export const matchQueries = {
     teamAPlayerIds: number[]
     teamBPlayerIds: number[]
     category?: string
+    comment?: string
   }): unknown {
     const db = getDb()
     const matchResult = db
-      .prepare('INSERT INTO matches (tournamentId, round, courtNumber, status, category) VALUES (?, ?, ?, ?, ?)')
-      .run(match.tournamentId, match.round ?? null, match.courtNumber ?? null, 'pending', match.category ?? null)
+      .prepare('INSERT INTO matches (tournamentId, round, courtNumber, status, category, comment) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(match.tournamentId, match.round ?? null, match.courtNumber ?? null, 'pending', match.category ?? null, match.comment ?? null)
     const matchId = matchResult.lastInsertRowid as number
 
     // Insère les participants côté A (autant que de joueurs dans l'équipe)
@@ -463,6 +465,13 @@ export const matchQueries = {
       'SELECT tournamentPlayerId FROM match_participants WHERE matchId = ? AND side = ?'
     ).all(completedMatchId, winnerSide) as { tournamentPlayerId: number }[]
 
+    // Enregistre le vainqueur sur le match terminé (référence tournament_players.id)
+    db.prepare('UPDATE matches SET winnerId = ? WHERE id = ?').run(tp.id, completedMatchId)
+
+    // Cas BYE : le joueur n'a pas de participation enregistrée — on l'avance quand même
+    const finalParticipants: { tournamentPlayerId: number }[] =
+      winnerParticipants.length > 0 ? winnerParticipants : [{ tournamentPlayerId: tp.id }]
+
     // Ne pas avancer si le créneau est déjà occupé (ex: matchs de poule round N+1)
     const occupied = db.prepare(
       'SELECT COUNT(*) as c FROM match_participants WHERE matchId = ? AND side = ?'
@@ -471,10 +480,26 @@ export const matchQueries = {
 
     // Remplace les participants du côté cible dans le prochain match
     db.prepare('DELETE FROM match_participants WHERE matchId = ? AND side = ?').run(targetMatch.id, side)
-    for (const p of winnerParticipants) {
+    for (const p of finalParticipants) {
       db.prepare('INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)')
         .run(targetMatch.id, side, p.tournamentPlayerId)
     }
+  },
+
+  /** Retourne tous les scores de tous les matchs d'un tournoi en une seule requête. */
+  getAllScores(tournamentId: number): unknown[] {
+    return getDb().prepare(`
+      SELECT ms.*
+      FROM match_scores ms
+      JOIN matches m ON m.id = ms.matchId
+      WHERE m.tournamentId = ?
+      ORDER BY ms.matchId, ms.setNumber
+    `).all(tournamentId)
+  },
+
+  /** Supprime tous les scores d'un match (avant réinitialisation). */
+  clearMatchScores(matchId: number): void {
+    getDb().prepare('DELETE FROM match_scores WHERE matchId = ?').run(matchId)
   },
 
   /**
@@ -495,6 +520,20 @@ export const matchQueries = {
         }
       }
     }
+  },
+
+  /**
+   * Échange le round et le courtNumber de deux matchs — pour réorganiser le planning sans toucher aux participants.
+   */
+  swapMatchPositions(matchId1: number, matchId2: number): void {
+    const db = getDb()
+    db.transaction(() => {
+      const m1 = db.prepare('SELECT round, courtNumber FROM matches WHERE id = ?').get(matchId1) as { round: number | null; courtNumber: number | null } | undefined
+      const m2 = db.prepare('SELECT round, courtNumber FROM matches WHERE id = ?').get(matchId2) as { round: number | null; courtNumber: number | null } | undefined
+      if (!m1 || !m2) return
+      db.prepare('UPDATE matches SET round = ?, courtNumber = ? WHERE id = ?').run(m2.round, m2.courtNumber, matchId1)
+      db.prepare('UPDATE matches SET round = ?, courtNumber = ? WHERE id = ?').run(m1.round, m1.courtNumber, matchId2)
+    })()
   },
 }
 

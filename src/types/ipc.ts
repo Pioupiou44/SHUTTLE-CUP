@@ -36,17 +36,20 @@ export interface DbApi {
 
   // Matchs
   getMatches: (tournamentId: number) => Promise<Match[]>
-  createMatch: (match: { tournamentId: number; round?: number; courtNumber?: number; playerAId: number; playerBId: number; category?: MatchCategory }) => Promise<Match>
+  createMatch: (match: { tournamentId: number; round?: number; courtNumber?: number; playerAId: number; playerBId: number; category?: MatchCategory; comment?: string }) => Promise<Match>
   updateMatchStatus: (matchId: number, status: string, winnerId?: number) => Promise<void>
   setMatchScore: (matchId: number, setNumber: number, scoreA: number, scoreB: number) => Promise<void>
   getMatchScores: (matchId: number) => Promise<MatchScore[]>
-  createMatchWithTeams: (match: { tournamentId: number; round?: number; courtNumber?: number; teamAPlayerIds: number[]; teamBPlayerIds: number[]; category?: MatchCategory }) => Promise<Match>
+  getAllMatchScores: (tournamentId: number) => Promise<MatchScore[]>
+  clearMatchScores: (matchId: number) => Promise<void>
+  createMatchWithTeams: (match: { tournamentId: number; round?: number; courtNumber?: number; teamAPlayerIds: number[]; teamBPlayerIds: number[]; category?: MatchCategory; comment?: string }) => Promise<Match>
   createPlaceholderMatch: (match: { tournamentId: number; round?: number; courtNumber?: number; comment?: string; category?: MatchCategory }) => Promise<Match>
   advanceWinner: (tournamentId: number, completedMatchId: number, winnerPlayerId: number) => Promise<void>
   seedKnockoutMatches: (seeds: { matchId: number; side: 'A' | 'B'; playerIds: number[]; tournamentId: number }[]) => Promise<void>
 
   // Réorganisation des matchs
   swapMatchSides: (matchId1: number, side1: 'A' | 'B', matchId2: number, side2: 'A' | 'B') => Promise<void>
+  swapMatchPositions: (matchId1: number, matchId2: number) => Promise<void>
   clearTournamentMatches: (tournamentId: number) => Promise<void>
 
   // Admin / dev

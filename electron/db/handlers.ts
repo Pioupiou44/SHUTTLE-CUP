@@ -51,6 +51,8 @@ export function registerDbHandlers(ipcMain: IpcMain): void {
     matchQueries.setScore(matchId, setNumber, scoreA, scoreB)
   )
   ipcMain.handle('db:getMatchScores', (_event, matchId) => matchQueries.getScores(matchId))
+  ipcMain.handle('db:getAllMatchScores', (_event, tournamentId) => matchQueries.getAllScores(tournamentId))
+  ipcMain.handle('db:clearMatchScores', (_event, matchId) => matchQueries.clearMatchScores(matchId))
   ipcMain.handle('db:createMatchWithTeams', (_event, match) => matchQueries.createWithTeams(match))
   ipcMain.handle('db:createPlaceholderMatch', (_event, match) => matchQueries.createPlaceholder(match))
   ipcMain.handle('db:advanceWinner', (_event, tournamentId, completedMatchId, winnerPlayerId) =>
@@ -63,6 +65,9 @@ export function registerDbHandlers(ipcMain: IpcMain): void {
   // Admin / dev
   ipcMain.handle('db:swapMatchSides', (_event, matchId1, side1, matchId2, side2) =>
     matchQueries.swapMatchSides(matchId1, side1, matchId2, side2)
+  )
+  ipcMain.handle('db:swapMatchPositions', (_event, matchId1, matchId2) =>
+    matchQueries.swapMatchPositions(matchId1, matchId2)
   )
   ipcMain.handle('db:clearTournamentMatches', (_event, tournamentId) =>
     matchQueries.clearForTournament(tournamentId)

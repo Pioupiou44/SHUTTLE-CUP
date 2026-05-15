@@ -118,11 +118,11 @@ export const CATEGORY_LABELS: Record<MatchCategory, string> = {
 
 // Libellé lisible d'un format de tournoi
 export const FORMAT_LABELS: Record<TournamentFormat, string> = {
-  'round-robin': 'Poules (tout le monde joue contre tout le monde)',
-  'knockout': 'Élimination directe (le perdant est éliminé)',
-  'double-elimination': 'Double élimination (2 défaites pour être éliminé)',
-  'pool+knockout': 'Poules + Élimination (format club recommandé)',
-  'americano': 'Américano (partenaires aléatoires à chaque ronde)',
-  'swiss': 'Système suisse (rondes fixes, pas d\'élimination)',
-  'king-of-court': 'Roi du court (les vainqueurs restent sur le terrain)',
+  'round-robin': 'Tout le monde joue contre tout le monde — classement final par points. Pas de finale.',
+  'knockout': 'Tableau à élimination directe — le perdant est éliminé à chaque tour.',
+  'double-elimination': 'Deux défaites pour être éliminé — tableau principal + repêchage.',
+  'pool+knockout': '⭐ Phase de poules puis tableau final généré automatiquement selon le classement. Recommandé pour les tournois de club.',
+  'americano': 'Partenaires et adversaires changent à chaque ronde selon les scores — adapté en doubles.',
+  'swiss': 'Rondes générées en fonction des résultats, pas d\'élimination (bientôt disponible)',
+  'king-of-court': 'Les vainqueurs restent sur le terrain, les perdants tournent (bientôt disponible)',
 }

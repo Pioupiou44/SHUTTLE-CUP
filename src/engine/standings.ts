@@ -33,18 +33,18 @@ export interface HeadToHeadRecord {
 
 /**
  * Calcule le classement complet d'un groupe de joueurs.
- * @param playerIds  - Liste des IDs participants
+ * @param playerIds   - Liste des IDs participants
  * @param playerNames - Map playerId → nom affiché
- * @param matches    - Matchs du groupe (avec scores)
- * @param scores     - Tous les scores indexés par matchId
- * @param rule       - Règle de scoring
+ * @param matches     - Matchs du groupe (avec scores)
+ * @param scores      - Tous les scores indexés par matchId
+ * @param rule        - Règle de scoring (optionnelle — fallback sur winnerSide DB)
  */
 export function computeStandings(
   playerIds: number[],
   playerNames: Map<number, string>,
   matches: Match[],
   scores: Map<number, MatchScore[]>,
-  rule: ScoringRule
+  rule: ScoringRule | undefined
 ): StandingEntry[] {
   // Initialise les entrées
   const entries = new Map<number, StandingEntry>()
@@ -69,19 +69,39 @@ export function computeStandings(
     if (match.status !== 'completed' && match.status !== 'walkover') continue
 
     const matchScores = scores.get(match.id) ?? []
-    const result = computeMatchResult(matchScores, rule)
-    if (!result.winner) continue
+
+    // Tentative de calcul du vainqueur via les scores + règle
+    let winner: 'A' | 'B' | null = null
+    let setsWonA = 0
+    let setsWonB = 0
+    let ptWonA = 0
+    let ptWonB = 0
+
+    if (rule && matchScores.length > 0) {
+      const result = computeMatchResult(matchScores, rule)
+      winner = result.winner
+      setsWonA = result.sets.filter((s) => s.winner === 'A').length
+      setsWonB = result.sets.filter((s) => s.winner === 'B').length
+      ptWonA = result.sets.reduce((acc, s) => acc + s.scoreA, 0)
+      ptWonB = result.sets.reduce((acc, s) => acc + s.scoreB, 0)
+    }
+
+    // Fallback : utilise winnerSide stocké en DB (ex. si la règle est absente ou scores incomplets)
+    if (!winner && match.winnerSide) {
+      winner = match.winnerSide
+      ptWonA = matchScores.reduce((acc, s) => acc + s.scoreA, 0)
+      ptWonB = matchScores.reduce((acc, s) => acc + s.scoreB, 0)
+      // Estimation sets conservatrice : 1-0 ou 0-1 (sans rule, on ne peut pas compter les sets exacts)
+      setsWonA = winner === 'A' ? 1 : 0
+      setsWonB = winner === 'B' ? 1 : 0
+    }
+
+    if (!winner) continue
 
     // Extrait TOUS les IDs de chaque équipe (1 en simple, 2 en double)
     const idsA = parseTeamIds(match.teamA)
     const idsB = parseTeamIds(match.teamB)
     if (idsA.length === 0 || idsB.length === 0) continue
-
-    // Comptage des sets et points — commun aux deux équipes
-    const setsWonA = result.sets.filter((s) => s.winner === 'A').length
-    const setsWonB = result.sets.filter((s) => s.winner === 'B').length
-    const ptWonA = result.sets.reduce((acc, s) => acc + s.scoreA, 0)
-    const ptWonB = result.sets.reduce((acc, s) => acc + s.scoreB, 0)
 
     // Applique les résultats à tous les membres de chaque équipe
     for (const idA of idsA) {
@@ -92,7 +112,7 @@ export function computeStandings(
       e.setsLost  += setsWonB
       e.pointsWon  += ptWonA
       e.pointsLost += ptWonB
-      if (result.winner === 'A') {
+      if (winner === 'A') {
         e.matchesWon++
         e.rankPoints += 2
       } else {
@@ -109,7 +129,7 @@ export function computeStandings(
       e.setsLost  += setsWonA
       e.pointsWon  += ptWonB
       e.pointsLost += ptWonA
-      if (result.winner === 'B') {
+      if (winner === 'B') {
         e.matchesWon++
         e.rankPoints += 2
       } else {

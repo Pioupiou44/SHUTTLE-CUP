@@ -10,7 +10,6 @@ import { generateRoundRobin } from '@/engine/generators/roundRobin'
 import { generateSingleElim } from '@/engine/generators/singleElim'
 import { generateAmericano } from '@/engine/generators/americano'
 import { generatePoolPlusKnockout } from '@/engine/generators/poolPlusKnockout'
-import { generateInterclub } from '@/engine/generators/interclub'
 import { computeStandings } from '@/engine/standings'
 import { computeMatchResult } from '@/engine/scoring'
 import type { Match, MatchScore, MatchCategory, ScoringRule, Player } from '@/types/domain'
@@ -370,6 +369,28 @@ const MATCH_STATUS_BADGE: Record<string, 'default' | 'active' | 'success' | 'war
   postponed:   'warning',
 }
 
+// Couleurs des équipes de préparation (même palette que le Wizard)
+const TEAM_COLORS_HEX: string[] = [
+  '#0047FF', // A — bleu
+  '#0a0a0a', // B — ink
+  '#D97500', // C — warn
+  '#E60022', // D — red
+  '#00C24A', // E — vert
+  '#4a4a4a', // F — gris foncé
+  '#6600cc', // G — violet
+  '#008080', // H — teal
+]
+
+/** Retourne la couleur hex de l'équipe-préparation d'un joueur, ou null si non assigné */
+function getTeamColor(teamStr: string | undefined, playerTeamMap: Map<number, string>): string | null {
+  if (!teamStr || teamStr === 'BYE') return null
+  const ids = teamStr.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
+  const side = ids.length > 0 ? playerTeamMap.get(ids[0]) : undefined
+  if (!side) return null
+  const idx = side.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0)
+  return TEAM_COLORS_HEX[idx] ?? TEAM_COLORS_HEX[TEAM_COLORS_HEX.length - 1]
+}
+
 // ─── Utilitaire ───────────────────────────────────────────────────────────────
 
 function resolveTeam(teamStr: string | undefined, playerNames: Map<number, string>): string {
@@ -489,6 +510,8 @@ function ScoreEditorModal({
     if (saving || !match) return
     setSaving(true)
     try {
+      // Supprime les scores enregistrés avant de repasser en pending
+      await window.db.clearMatchScores(match.id)
       await window.db.updateMatchStatus(match.id, 'pending')
       onSaved()
       onClose()
@@ -610,6 +633,187 @@ function ScoreEditorModal({
 
 // ─── Onglet Planning ──────────────────────────────────────────────────────────
 
+// ─── Modal création manuelle de match ────────────────────────────────────────
+
+const MANUAL_CATS: { value: '' | MatchCategory; label: string }[] = [
+  { value: '',   label: 'Sans catégorie' },
+  { value: 'SH', label: 'SH — Simple H' },
+  { value: 'SD', label: 'SD — Simple F' },
+  { value: 'DH', label: 'DH — Double H' },
+  { value: 'DD', label: 'DD — Double F' },
+  { value: 'DX', label: 'DX — Mixte' },
+]
+
+function AddMatchModal({
+  isOpen,
+  onClose,
+  tournamentId,
+  tournamentPlayerRows,
+  allPlayerNames,
+  courtCount,
+  onCreated,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  tournamentId: number
+  tournamentPlayerRows: import('@/types/domain').TournamentPlayer[]
+  allPlayerNames: Map<number, string>
+  courtCount: number
+  onCreated: () => void
+}) {
+  const [cat, setCat] = useState<'' | MatchCategory>('')
+  const [round, setRound] = useState('1')
+  const [court, setCourt] = useState('1')
+  const [sideA, setSideA] = useState<[number, number]>([0, 0])
+  const [sideB, setSideB] = useState<[number, number]>([0, 0])
+  const [saving, setSaving] = useState(false)
+
+  const isDoubles = cat === 'DH' || cat === 'DD' || cat === 'DX'
+
+  // Filtre les joueurs éligibles selon la catégorie et le slot
+  const eligiblePlayers = (slot: 0 | 1): { id: number; name: string }[] => {
+    const gender: 'M' | 'F' | null =
+      cat === 'SH' || cat === 'DH' || (cat === 'DX' && slot === 0) ? 'M'
+        : cat === 'SD' || cat === 'DD' || (cat === 'DX' && slot === 1) ? 'F'
+        : null
+    return tournamentPlayerRows
+      .filter((r) => !gender || r.gender === gender)
+      .map((r) => ({ id: r.playerId, name: allPlayerNames.get(r.playerId) ?? `#${r.playerId}` }))
+  }
+
+  // Réinitialise les sélections à l'ouverture
+  useEffect(() => {
+    if (!isOpen) return
+    setCat('')
+    setRound('1')
+    setCourt('1')
+    setSideA([0, 0])
+    setSideB([0, 0])
+  }, [isOpen])
+
+  const handleSubmit = async () => {
+    const roundN = parseInt(round, 10)
+    const courtN = parseInt(court, 10)
+    if (isNaN(roundN) || isNaN(courtN)) return
+    setSaving(true)
+    try {
+      if (isDoubles) {
+        await window.db.createMatchWithTeams({
+          tournamentId,
+          round: roundN,
+          courtNumber: courtN,
+          teamAPlayerIds: [sideA[0], sideA[1]],
+          teamBPlayerIds: [sideB[0], sideB[1]],
+          category: (cat as MatchCategory) || undefined,
+        })
+      } else {
+        await window.db.createMatch({
+          tournamentId,
+          round: roundN,
+          courtNumber: courtN,
+          playerAId: sideA[0],
+          playerBId: sideB[0],
+          category: (cat as MatchCategory) || undefined,
+        })
+      }
+      onCreated()
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const canSave = isDoubles
+    ? sideA[0] > 0 && sideA[1] > 0 && sideB[0] > 0 && sideB[1] > 0
+    : sideA[0] > 0 && sideB[0] > 0
+
+  const PlayerSelect = ({
+    value, onChange, slot, label,
+  }: { value: number; onChange: (id: number) => void; slot: 0 | 1; label: string }) => (
+    <select
+      value={value}
+      onChange={(e) => onChange(parseInt(e.target.value, 10))}
+      className="w-full border-2 border-line bg-bg font-sans text-[13px] text-ink px-3 py-2 focus:outline-none focus:border-blue"
+    >
+      <option value={0}>— {label} —</option>
+      {eligiblePlayers(slot).map((p) => (
+        <option key={p.id} value={p.id}>{p.name}</option>
+      ))}
+    </select>
+  )
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Ajouter un match manuellement" size="md">
+      <div className="flex flex-col gap-4">
+
+        {/* Discipline */}
+        <div>
+          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">Discipline</p>
+          <div className="flex flex-wrap gap-2">
+            {MANUAL_CATS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => { setCat(opt.value); setSideA([0, 0]); setSideB([0, 0]) }}
+                className={`px-3 py-1.5 border-2 font-mono font-bold text-[11px] uppercase tracking-[0.06em] transition-colors
+                  ${cat === opt.value
+                    ? 'bg-ink text-green-fluo border-ink'
+                    : 'bg-bg text-ink border-line hover:border-blue'}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Ronde + Terrain */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-1">Ronde</p>
+            <input
+              type="number" min={1} value={round}
+              onChange={(e) => setRound(e.target.value)}
+              className="w-full border-2 border-line bg-bg font-sans text-[13px] text-ink px-3 py-2 focus:outline-none focus:border-blue"
+            />
+          </div>
+          <div>
+            <p className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-1">Terrain</p>
+            <input
+              type="number" min={1} max={courtCount} value={court}
+              onChange={(e) => setCourt(e.target.value)}
+              className="w-full border-2 border-line bg-bg font-sans text-[13px] text-ink px-3 py-2 focus:outline-none focus:border-blue"
+            />
+          </div>
+        </div>
+
+        {/* Sélection joueurs */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-blue">Équipe A</p>
+            <PlayerSelect value={sideA[0]} onChange={(v) => setSideA([v, sideA[1]])} slot={0} label={isDoubles ? 'Joueur A1' : 'Joueur A'} />
+            {isDoubles && (
+              <PlayerSelect value={sideA[1]} onChange={(v) => setSideA([sideA[0], v])} slot={1} label="Joueur A2" />
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-ink-2">Équipe B</p>
+            <PlayerSelect value={sideB[0]} onChange={(v) => setSideB([v, sideB[1]])} slot={0} label={isDoubles ? 'Joueur B1' : 'Joueur B'} />
+            {isDoubles && (
+              <PlayerSelect value={sideB[1]} onChange={(v) => setSideB([sideB[0], v])} slot={1} label="Joueur B2" />
+            )}
+          </div>
+        </div>
+
+        <Button disabled={!canSave || saving} onClick={() => void handleSubmit()}>
+          <Plus size={13} className="mr-1 inline" />
+          {saving ? 'Ajout…' : 'Ajouter ce match'}
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── Onglet Planning ──────────────────────────────────────────────────────────
+
 function PlanningTab({
   matches,
   tournamentId,
@@ -623,6 +827,8 @@ function PlanningTab({
   swapMode = false,
   swapSlot = null,
   onSwapSelect,
+  onSwapPositions,
+  playerTeamMap,
 }: {
   matches: Match[]
   tournamentId: number
@@ -636,10 +842,14 @@ function PlanningTab({
   swapMode?: boolean
   swapSlot?: { matchId: number; side: 'A' | 'B' } | null
   onSwapSelect?: (matchId: number, side: 'A' | 'B') => void
+  onSwapPositions?: (matchId1: number, matchId2: number) => void
+  playerTeamMap?: Map<number, string>
 }) {
   const [filterCat, setFilterCat] = useState<MatchCategory | 'all'>('all')
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null)
   const [seeding, setSeeding] = useState(false)
+  const [dragMatchId, setDragMatchId] = useState<number | null>(null)
+  const [dragOverId, setDragOverId] = useState<number | null>(null)
 
   // Détecte si le bracket knockout peut être généré depuis les poules
   const canSeedKnockout = useMemo(() => {
@@ -654,7 +864,7 @@ function PlanningTab({
 
   // Calcule les classements par groupe et insère les participants dans le knockout
   const handleSeedKnockout = async () => {
-    if (!rule || seeding) return
+    if (seeding) return
     setSeeding(true)
     try {
       const seeds: { matchId: number; side: 'A' | 'B'; playerIds: number[]; tournamentId: number }[] = []
@@ -664,10 +874,15 @@ function PlanningTab({
 
       for (const cat of rangeCategories) {
         const catPool = cat ? poolMatches.filter((m) => m.category === cat) : poolMatches
-        const groupA = catPool.filter((m) => m.comment === 'Groupe A')
-        const groupB = catPool.filter((m) => m.comment === 'Groupe B')
 
-        // Classe les équipes d'un groupe par nombre de victoires
+        // Collecte dynamiquement tous les groupes présents (Groupe A, Groupe B, Groupe C…)
+        const allGroupNames = [...new Set(catPool.map((m) => m.comment))]
+          .filter((c): c is string => typeof c === 'string' && c.startsWith('Groupe'))
+          .sort()
+
+        if (allGroupNames.length === 0) continue
+
+        // Classe les équipes d'un groupe par nombre de victoires puis ratio points
         const rankTeams = (groupMatches: Match[]) => {
           const teams = new Set<string>()
           for (const m of groupMatches) {
@@ -675,23 +890,36 @@ function PlanningTab({
             if (m.teamB) teams.add(m.teamB)
           }
           const wins = new Map<string, number>()
-          for (const team of teams) wins.set(team, 0)
+          const pts = new Map<string, number>()
+          for (const team of teams) { wins.set(team, 0); pts.set(team, 0) }
           for (const m of groupMatches) {
             if (m.status !== 'completed' && m.status !== 'walkover') continue
             const ms = allScores.get(m.id) ?? []
-            const result = computeMatchResult(ms, rule)
-            if (!result.winner) continue
-            const winner = result.winner === 'A' ? m.teamA : m.teamB
+            // Utilise la règle si disponible, sinon fallback sur winnerSide stocké en DB
+            let winnerSide: 'A' | 'B' | null = null
+            if (rule && ms.length > 0) {
+              const result = computeMatchResult(ms, rule)
+              winnerSide = result.winner
+            }
+            if (!winnerSide) winnerSide = m.winnerSide ?? null
+            if (!winnerSide) continue
+            const winner = winnerSide === 'A' ? m.teamA : m.teamB
             if (winner) wins.set(winner, (wins.get(winner) ?? 0) + 1)
+            for (const s of ms) {
+              const ta = m.teamA ?? ''; const tb = m.teamB ?? ''
+              pts.set(ta, (pts.get(ta) ?? 0) + s.scoreA)
+              pts.set(tb, (pts.get(tb) ?? 0) + s.scoreB)
+            }
           }
           return Array.from(teams)
-            .map((t) => ({ team: t, wins: wins.get(t) ?? 0 }))
-            .sort((a, b) => b.wins - a.wins)
+            .map((t) => ({ team: t, wins: wins.get(t) ?? 0, pts: pts.get(t) ?? 0 }))
+            .sort((a, b) => b.wins - a.wins || b.pts - a.pts)
         }
 
-        const teamsA = rankTeams(groupA)
-        const teamsB = rankTeams(groupB)
-        if (teamsA.length === 0 || teamsB.length === 0) continue
+        const groupRankings = new Map<string, ReturnType<typeof rankTeams>>()
+        for (const groupName of allGroupNames) {
+          groupRankings.set(groupName, rankTeams(catPool.filter((m) => m.comment === groupName)))
+        }
 
         const ko1 = matches
           .filter((m) => m.round === 101 && (cat ? m.category === cat : true))
@@ -700,18 +928,36 @@ function PlanningTab({
 
         const parseIds = (team: string) => team.split(',').map(Number).filter((n) => !isNaN(n) && n > 0)
 
-        if (ko1.length === 1) {
-          // Finale directe (2 qualifiants au total)
-          seeds.push({ matchId: ko1[0].id, side: 'A', playerIds: parseIds(teamsA[0].team), tournamentId })
-          seeds.push({ matchId: ko1[0].id, side: 'B', playerIds: parseIds(teamsB[0].team), tournamentId })
+        if (allGroupNames.length === 2) {
+          // 2 groupes : cross-seeding classique A1 vs B2, B1 vs A2
+          const [rA, rB] = [groupRankings.get(allGroupNames[0]) ?? [], groupRankings.get(allGroupNames[1]) ?? []]
+          if (rA.length === 0 || rB.length === 0) continue
+          if (ko1.length === 1) {
+            seeds.push({ matchId: ko1[0].id, side: 'A', playerIds: parseIds(rA[0].team), tournamentId })
+            seeds.push({ matchId: ko1[0].id, side: 'B', playerIds: parseIds(rB[0].team), tournamentId })
+          } else {
+            seeds.push({ matchId: ko1[0].id, side: 'A', playerIds: parseIds(rA[0].team), tournamentId })
+            seeds.push({ matchId: ko1[0].id, side: 'B', playerIds: parseIds((rB[1] ?? rB[0]).team), tournamentId })
+            seeds.push({ matchId: ko1[1].id, side: 'A', playerIds: parseIds(rB[0].team), tournamentId })
+            seeds.push({ matchId: ko1[1].id, side: 'B', playerIds: parseIds((rA[1] ?? rA[0]).team), tournamentId })
+          }
         } else {
-          // Cross-seeding : A1 vs B2, B1 vs A2
-          const b2 = teamsB[1] ?? teamsB[0]
-          const a2 = teamsA[1] ?? teamsA[0]
-          seeds.push({ matchId: ko1[0].id, side: 'A', playerIds: parseIds(teamsA[0].team), tournamentId })
-          seeds.push({ matchId: ko1[0].id, side: 'B', playerIds: parseIds(b2.team), tournamentId })
-          seeds.push({ matchId: ko1[1].id, side: 'A', playerIds: parseIds(teamsB[0].team), tournamentId })
-          seeds.push({ matchId: ko1[1].id, side: 'B', playerIds: parseIds(a2.team), tournamentId })
+          // N groupes : qualifiants listés par niveau (tous 1ers, puis tous 2es…) avec inversion pour éviter rematches
+          const qualifiers: string[] = []
+          const perGroup = Math.ceil(ko1.length * 2 / allGroupNames.length)
+          for (let rank = 0; rank < perGroup; rank++) {
+            // Inverser l'ordre des groupes pour les runners-up = cross-seeding anti-rematch
+            const orderedGroups = rank % 2 === 0 ? [...allGroupNames] : [...allGroupNames].reverse()
+            for (const groupName of orderedGroups) {
+              const ranked = groupRankings.get(groupName) ?? []
+              if (ranked[rank]) qualifiers.push(ranked[rank].team)
+            }
+          }
+          // Distribue dans les slots KO1 : A et B alternés
+          for (let i = 0; i < ko1.length && i * 2 + 1 < qualifiers.length; i++) {
+            seeds.push({ matchId: ko1[i].id, side: 'A', playerIds: parseIds(qualifiers[i * 2]), tournamentId })
+            seeds.push({ matchId: ko1[i].id, side: 'B', playerIds: parseIds(qualifiers[i * 2 + 1]), tournamentId })
+          }
         }
       }
 
@@ -763,7 +1009,9 @@ function PlanningTab({
         <div className="flex items-center gap-4 p-4 border-2 border-green bg-bg-strong">
           <div className="flex-1">
             <p className="font-black uppercase text-[14px] tracking-[-0.01em] text-ink">Phase de poules terminée !</p>
-            <p className="font-sans text-[13px] text-ink-2 mt-0.5">Les matchs knockout peuvent maintenant être générés depuis les classements.</p>
+            <p className="font-sans text-[13px] text-ink-2 mt-0.5">
+              Cliquez sur le bouton pour générer le tableau final (demi-finales, finale…) en fonction du classement des poules.
+            </p>
           </div>
           <button
             onClick={() => { void handleSeedKnockout() }}
@@ -813,10 +1061,16 @@ function PlanningTab({
                 const isSelectedB = swapSlot?.matchId === m.id && swapSlot?.side === 'B'
 
                 const teamCell = (side: 'A' | 'B', label: string, isWin: boolean, isSelected: boolean) => {
+                  const rawTeam = side === 'A' ? m.teamA : m.teamB
+                  const dotColor = playerTeamMap ? getTeamColor(rawTeam, playerTeamMap) : null
+                  const dot = dotColor
+                    ? <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
+                    : null
+
                   if (swapMode && onSwapSelect) {
                     return (
                       <button
-                        className={`font-sans font-bold text-[14px] text-left px-1 border-2 transition-colors
+                        className={`font-sans font-bold text-[14px] text-left px-1 border-2 transition-colors flex items-center gap-2
                           ${isSelected
                             ? 'border-blue bg-blue text-white'
                             : swapSlot
@@ -824,25 +1078,38 @@ function PlanningTab({
                               : 'border-dashed border-line-soft text-ink hover:border-blue hover:bg-blue/5 cursor-pointer'}`}
                         onClick={(e) => { e.stopPropagation(); onSwapSelect(m.id, side) }}
                       >
+                        {dot}
                         {label}
                       </button>
                     )
                   }
                   return (
-                    <span className={`font-sans font-bold text-[14px] ${isWin ? 'text-green' : isDone ? 'text-ink-3' : 'text-ink'}`}>
+                    <span className={`font-sans font-bold text-[14px] flex items-center gap-2 ${isWin ? 'text-green' : isDone ? 'text-ink-3' : 'text-ink'}`}>
+                      {dot}
                       {label}
-                      {isWin && <span className="ml-2 font-mono font-bold text-[10px] text-green uppercase tracking-[0.06em]">▲ Gagnant</span>}
                     </span>
                   )
                 }
 
                 return (
                   <div key={m.id}
+                    draggable={swapMode && !!onSwapPositions}
+                    onDragStart={() => { setDragMatchId(m.id); setDragOverId(null) }}
+                    onDragEnd={() => { setDragMatchId(null); setDragOverId(null) }}
+                    onDragOver={(e) => { e.preventDefault(); if (dragMatchId !== m.id) setDragOverId(m.id) }}
+                    onDragLeave={() => setDragOverId(null)}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      if (dragMatchId && dragMatchId !== m.id && onSwapPositions) onSwapPositions(dragMatchId, m.id)
+                      setDragMatchId(null); setDragOverId(null)
+                    }}
                     className={`grid ${colsHeader} items-center px-4 py-3
                       border-b border-line-soft transition-colors
-                      ${swapMode ? '' : 'hover:bg-bg-strong cursor-pointer'}
+                      ${swapMode ? 'cursor-grab' : 'hover:bg-bg-strong cursor-pointer'}
                       ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}
-                      ${isSelectedA || isSelectedB ? 'ring-2 ring-inset ring-blue' : ''}`}
+                      ${isSelectedA || isSelectedB ? 'ring-2 ring-inset ring-blue' : ''}
+                      ${dragOverId === m.id && dragMatchId !== m.id ? 'ring-2 ring-inset ring-green' : ''}
+                      ${dragMatchId === m.id ? 'opacity-50' : ''}`}
                     onClick={() => { if (!swapMode) setSelectedMatch(m) }}
                   >
                     {teamCell('A', resolveTeam(m.teamA, allPlayerNames), isWinA, isSelectedA)}
@@ -917,46 +1184,98 @@ function StandingsTab({
   allScores,
   rule,
   players,
+  allPlayerNames,
 }: {
   tournamentPlayers: number[]
   matches: Match[]
   allScores: Map<number, MatchScore[]>
   rule: ScoringRule | undefined
   players: ReturnType<typeof usePlayersStore.getState>['players']
+  allPlayerNames: Map<number, string>
 }) {
   const standings = useMemo(() => {
-    if (!rule || matches.length === 0 || tournamentPlayers.length === 0) return []
+    if (matches.length === 0 || tournamentPlayers.length === 0) return []
     const playerNames = new Map(players.map((p) => [p.id, playerDisplayName(p)]))
     return computeStandings(tournamentPlayers, playerNames, matches, allScores, rule)
   }, [matches, allScores, tournamentPlayers, players, rule])
 
+  // Classement par paires — pour les matchs doubles (teamA contient plusieurs IDs)
+  const pairStandings = useMemo(() => {
+    const doublesMatches = matches.filter((m) => m.teamA?.includes(',') || m.teamB?.includes(','))
+    if (doublesMatches.length === 0) return []
+    return computePoolTeamStandings(doublesMatches, allScores, allPlayerNames)
+  }, [matches, allScores, allPlayerNames])
+
   if (standings.length === 0) {
     return (
-      <p className="font-sans text-[14px] text-ink-3">
-        {matches.length === 0 ? 'Lancez le tournoi pour générer les matchs.' : 'En attente des premiers résultats.'}
-      </p>
+      <div className="flex flex-col gap-2">
+        {!rule && matches.length > 0 && (
+          <p className="font-mono text-[11px] text-warn font-bold uppercase tracking-[0.06em] border-l-2 border-warn pl-3">
+            Aucune règle de score configurée — le classement nécessite une règle.
+          </p>
+        )}
+        <p className="font-sans text-[14px] text-ink-3">
+          {matches.length === 0 ? 'Lancez le tournoi pour générer les matchs.' : 'En attente des premiers résultats.'}
+        </p>
+      </div>
     )
   }
 
   return (
-    <div className="flex flex-col border-2 border-line">
-      <div className="grid grid-cols-[32px_1fr_60px_60px_80px_80px] bg-ink px-4 py-3">
-        {['#', 'Joueur', 'V', 'D', 'Sets', 'Pts class.'].map((h) => (
-          <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
-        ))}
-      </div>
-      {standings.map((entry, i) => (
-        <div key={entry.playerId}
-          className={`grid grid-cols-[32px_1fr_60px_60px_80px_80px] items-center px-4 py-3
-            border-b border-line-soft ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
-          <span className={`text-[11px] font-mono font-bold ${i === 0 ? 'text-blue' : 'text-ink-3'}`}>{i + 1}</span>
-          <span className="font-sans font-bold text-[14px] text-ink">{entry.playerName}</span>
-          <span className="font-mono text-[14px] text-green font-bold">{entry.matchesWon}</span>
-          <span className="font-mono text-[14px] text-ink-3">{entry.matchesLost}</span>
-          <span className="font-mono text-[12px] text-ink-3">{entry.setsWon}/{entry.setsWon + entry.setsLost}</span>
-          <span className={`font-mono font-bold text-[14px] ${i === 0 ? 'text-blue' : 'text-ink'}`}>{entry.rankPoints}</span>
+    <div className="flex flex-col gap-6">
+      {/* Classement individuel */}
+      <div className="flex flex-col border-2 border-line">
+        <div className="grid grid-cols-[32px_1fr_100px_64px_120px_60px_60px_70px_80px] bg-ink px-4 py-3">
+          {['#', 'Joueur', 'Pseudo', 'N° Doss', 'Équipe', 'V', 'D', 'Sets', 'Pts'].map((h) => (
+            <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
+          ))}
         </div>
-      ))}
+        {standings.map((entry, i) => {
+          const p = players.find((pl) => pl.id === entry.playerId)
+          return (
+            <div key={entry.playerId}
+              className={`grid grid-cols-[32px_1fr_100px_64px_120px_60px_60px_70px_80px] items-center px-4 py-3
+                border-b border-line-soft ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
+              <span className={`text-[11px] font-mono font-bold ${i === 0 ? 'text-blue' : 'text-ink-3'}`}>{i + 1}</span>
+              <span className="font-sans font-bold text-[14px] text-ink">{entry.playerName}</span>
+              <span className="font-mono text-[12px] text-ink-3 truncate">{p?.pseudo ? `"${p.pseudo}"` : '—'}</span>
+              <span className="font-mono text-[12px] text-ink-3">{p?.playerNumber != null ? String(p.playerNumber).padStart(2, '0') : '—'}</span>
+              <span className="font-sans text-[12px] text-ink-2 truncate">{p?.club || '—'}</span>
+              <span className="font-mono text-[14px] text-green font-bold">{entry.matchesWon}</span>
+              <span className="font-mono text-[14px] text-ink-3">{entry.matchesLost}</span>
+              <span className="font-mono text-[12px] text-ink-3">{entry.setsWon}/{entry.setsWon + entry.setsLost}</span>
+              <span className={`font-mono font-bold text-[14px] ${i === 0 ? 'text-blue' : 'text-ink'}`}>{entry.rankPoints}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Classement par paires (doubles uniquement) */}
+      {pairStandings.length > 0 && (
+        <div className="flex flex-col border-2 border-line">
+          <div className="grid grid-cols-[32px_1fr_60px_60px_60px] bg-ink px-4 py-3">
+            {['#', 'Paire', 'V', 'D', '±Pts'].map((h) => (
+              <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
+            ))}
+          </div>
+          {pairStandings.map((entry, i) => {
+            const diff = entry.ptWon - entry.ptLost
+            return (
+              <div key={entry.key}
+                className={`grid grid-cols-[32px_1fr_60px_60px_60px] items-center px-4 py-3
+                  border-b border-line-soft ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
+                <span className={`text-[11px] font-mono font-bold ${i === 0 ? 'text-blue' : 'text-ink-3'}`}>{i + 1}</span>
+                <span className="font-sans font-bold text-[14px] text-ink truncate">{entry.name}</span>
+                <span className="font-mono text-[14px] text-green font-bold">{entry.wins}</span>
+                <span className="font-mono text-[14px] text-ink-3">{entry.losses}</span>
+                <span className={`font-mono font-bold text-[13px] ${diff > 0 ? 'text-green' : diff < 0 ? 'text-red' : 'text-ink-3'}`}>
+                  {diff > 0 ? `+${diff}` : diff}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -1098,46 +1417,70 @@ function PoolTab({
   matches,
   allScores,
   allPlayerNames,
+  tournamentFormat,
 }: {
   matches: Match[]
   allScores: Map<number, MatchScore[]>
   allPlayerNames: Map<number, string>
+  tournamentFormat: string
 }) {
+  const isPoolKnockout = tournamentFormat === 'pool+knockout'
+
   const poolGroups = useMemo(() => {
     const groups = new Map<string, Match[]>()
-    for (const m of matches) {
-      if (!m.comment?.startsWith('Groupe')) continue
-      if ((m.round ?? 0) >= 100) continue
-      if (!groups.has(m.comment)) groups.set(m.comment, [])
-      groups.get(m.comment)!.push(m)
+    if (isPoolKnockout) {
+      // Groupe par comment "Groupe X" (matchs de poules, rounds < 100)
+      for (const m of matches) {
+        if (!m.comment?.startsWith('Groupe')) continue
+        if ((m.round ?? 0) >= 100) continue
+        if (!groups.has(m.comment)) groups.set(m.comment, [])
+        groups.get(m.comment)!.push(m)
+      }
+    } else {
+      // Round-robin / americano : groupe par catégorie (ou un seul groupe si pas de cats)
+      for (const m of matches) {
+        const key = m.category ?? 'Général'
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(m)
+      }
     }
     return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b))
-  }, [matches])
+  }, [matches, isPoolKnockout])
 
   if (poolGroups.length === 0) {
     return (
       <p className="font-sans text-[14px] text-ink-3">
-        Aucune poule générée. Lancez le tournoi pour créer les matchs.
+        {matches.length === 0
+          ? 'Lancez le tournoi pour créer les matchs.'
+          : 'Aucune poule disponible dans ce format.'}
       </p>
     )
+  }
+
+  // Libellé du groupe
+  const groupLabel = (key: string): string => {
+    if (key in CATEGORY_LABELS) return CATEGORY_LABELS[key as keyof typeof CATEGORY_LABELS]
+    return key
   }
 
   return (
     <div className="flex flex-col gap-6">
       <div className={`grid gap-6 ${poolGroups.length > 1 ? 'grid-cols-2' : ''}`}>
-        {poolGroups.map(([poolName, poolMs]) => (
+        {poolGroups.map(([poolKey, poolMs]) => (
           <PoolTable
-            key={poolName}
-            name={poolName}
+            key={poolKey}
+            name={groupLabel(poolKey)}
             matches={poolMs}
             allScores={allScores}
             allPlayerNames={allPlayerNames}
           />
         ))}
       </div>
-      <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
-        Phase finale — voir l'onglet Bracket. Tirage automatique en fin de poules.
-      </p>
+      {isPoolKnockout && (
+        <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
+          Phase finale — voir l'onglet Bracket. Tirage automatique en fin de poules.
+        </p>
+      )}
     </div>
   )
 }
@@ -1399,10 +1742,17 @@ export function TournamentDetail() {
     return map
   })
   const [setupModalOpen, setSetupModalOpen] = useState(false)
+  const [addMatchOpen, setAddMatchOpen] = useState(false)
 
   // Ref pour l'auto-génération depuis le wizard (via location.state)
   const handleGenerateRef = useRef<() => Promise<void>>(async () => {})
   const [autoGenerate] = useState(() => !!(location.state as { autoGenerate?: boolean })?.autoGenerate)
+  const [wizardPoolAssignments] = useState<number[][] | undefined>(
+    () => (location.state as { poolAssignments?: number[][] } | null)?.poolAssignments
+  )
+  const [wizardDoublesPoolAssignments] = useState<Partial<Record<MatchCategory, number[][]>> | undefined>(
+    () => (location.state as { doublesPoolAssignments?: Partial<Record<MatchCategory, number[][]>> } | null)?.doublesPoolAssignments
+  )
   const autoGenerateDone = useRef(false)
 
   const tournament = tournaments.find((t) => t.id === tournamentId)
@@ -1425,11 +1775,14 @@ export function TournamentDetail() {
         setTournamentPlayers(tp.map((p) => p.playerId))
         setTournamentPlayerRows(tp)
         setMatches(m)
+        // Charge tous les scores en une seule requête (remplace N appels getMatchScores)
+        const allScoresArr = await window.db.getAllMatchScores(tournamentId)
         const scoresMap = new Map<number, MatchScore[]>()
-        await Promise.all(m.map(async (match) => {
-          const s = await window.db.getMatchScores(match.id)
-          scoresMap.set(match.id, s)
-        }))
+        for (const s of allScoresArr) {
+          const arr = scoresMap.get(s.matchId) ?? []
+          arr.push(s)
+          scoresMap.set(s.matchId, arr)
+        }
         setAllScores(scoresMap)
       } finally {
         setLoading(false)
@@ -1472,7 +1825,7 @@ export function TournamentDetail() {
   // En mode interclub les doubles sont auto-générés — pas de configuration de paires requise
   const pairsReady = tournament.teamMode === 1 || !hasDoublesCats || doublesCategories.every((cat) => {
     const pairs = doublesTeams.get(cat) ?? []
-    return pairs.filter(([a, b]) => a > 0 && b > 0 && a !== b).length >= 2
+    return pairs.filter(([a, b]) => a > 0 && b > 0 && a !== b).length >= 1
   })
 
   // ─── Génération format-aware ───────────────────────────────────────────────
@@ -1579,6 +1932,10 @@ export function TournamentDetail() {
       const categoriesToGenerate: (MatchCategory | undefined)[] =
         tournament.categories.length > 0 ? tournament.categories : [undefined]
 
+      // Collect les catégories ignorées pour avertissement final
+      const skippedCategories: string[] = []
+      const isKnockoutFormat = ['knockout', 'double-elimination'].includes(tournament.format)
+
       for (const category of categoriesToGenerate) {
         const isDoubles = category !== undefined && DOUBLES_CATEGORIES.includes(category)
 
@@ -1586,11 +1943,14 @@ export function TournamentDetail() {
         if (isDoubles) {
           const pairs = doublesTeams.get(category) ?? []
           const validPairs = pairs.filter(([a, b]) => a > 0 && b > 0 && a !== b)
-          if (validPairs.length < 2) continue
+          if (validPairs.length < 1) {
+            if (category) skippedCategories.push(category)
+            continue
+          }
 
           // Les générateurs travaillent avec des "indices" (fake IDs)
           const fakeIds = validPairs.map((_, i) => i)
-          let generated: Omit<Match, 'id' | 'winnerId' | 'comment'>[] = []
+          let generated: Omit<Match, 'id' | 'winnerId'>[] = []
 
           switch (tournament.format) {
             case 'round-robin':
@@ -1601,7 +1961,26 @@ export function TournamentDetail() {
               generated = generateSingleElim(fakeIds, tournamentId)
               break
             case 'pool+knockout': {
-              const result = generatePoolPlusKnockout(fakeIds, { tournamentId, courtCount: tournament.courtCount, poolCount: tournament.poolCount ?? 2 })
+              // Pour les doubles, utilise les assignments de paires du wizard (indices 0,1,2…)
+              // si disponibles et cohérents — sinon répartition automatique
+              const poolCount = tournament.poolCount ?? 2
+              let manualPools: number[][] | undefined
+              if (wizardDoublesPoolAssignments && category) {
+                const catAssignments = wizardDoublesPoolAssignments[category]
+                if (
+                  catAssignments &&
+                  catAssignments.length === poolCount &&
+                  catAssignments.every((pool) => pool.every((idx) => idx < validPairs.length))
+                ) {
+                  manualPools = catAssignments
+                }
+              }
+              const result = generatePoolPlusKnockout(fakeIds, {
+                tournamentId,
+                courtCount: tournament.courtCount,
+                poolCount,
+                manualPools,
+              })
               generated = [...result.poolMatches, ...result.knockoutMatches]
               break
             }
@@ -1611,6 +1990,9 @@ export function TournamentDetail() {
             default:
               generated = generateRoundRobin(fakeIds, { tournamentId, courtCount: tournament.courtCount })
           }
+
+          // Matchs BYE en knockout doubles — track pour auto-avancement
+          const byeAdvancesDoubles: { matchId: number; realPairIdx: number }[] = []
 
           for (const m of generated) {
             if (m.teamA && m.teamB && m.teamA !== 'BYE' && m.teamB !== 'BYE') {
@@ -1624,9 +2006,51 @@ export function TournamentDetail() {
                 teamAPlayerIds: [...validPairs[idxA]],
                 teamBPlayerIds: [...validPairs[idxB]],
                 category,
+                comment: m.comment,
               })
             } else if (['knockout', 'double-elimination', 'pool+knockout'].includes(tournament.format)) {
-              await window.db.createPlaceholderMatch({ tournamentId, round: m.round, category })
+              const created = await window.db.createPlaceholderMatch({ tournamentId, round: m.round, category, comment: m.comment })
+              // Track les BYEs du premier tour pour auto-avancement
+              if (isKnockoutFormat && m.round === 1 && (m.teamA === 'BYE' || m.teamB === 'BYE')) {
+                const realIdx = m.teamA !== 'BYE' ? parseInt(m.teamA!, 10) : parseInt(m.teamB!, 10)
+                if (!isNaN(realIdx) && realIdx < validPairs.length) {
+                  byeAdvancesDoubles.push({ matchId: created.id, realPairIdx: realIdx })
+                }
+              }
+            }
+          }
+
+          // Auto-avance les équipes doubles qui avaient un BYE
+          for (const { matchId, realPairIdx } of byeAdvancesDoubles) {
+            await window.db.updateMatchStatus(matchId, 'completed')
+            // Avance via le premier joueur de la paire (advanceWinner trouve toute la paire via les participants)
+            await window.db.advanceWinner(tournamentId, matchId, validPairs[realPairIdx][0])
+          }
+
+          // ── Joueurs orphelins (non appariés) → génère des matchs singles ─
+          // Applicable uniquement en DX où le déséquilibre H/F laisse des orphelins
+          if (category === 'DX') {
+            const usedInPairs = new Set<number>(validPairs.flatMap(([a, b]) => [a, b]))
+            const orphanMen   = tournamentPlayerRows.filter((r) => r.gender === 'M' && !usedInPairs.has(r.playerId)).map((r) => r.playerId)
+            const orphanWomen = tournamentPlayerRows.filter((r) => r.gender === 'F' && !usedInPairs.has(r.playerId)).map((r) => r.playerId)
+
+            if (orphanMen.length >= 2) {
+              const shMatches = generateRoundRobin(orphanMen, { tournamentId, courtCount: tournament.courtCount })
+              for (const om of shMatches) {
+                if (!om.teamA || !om.teamB || om.teamA === 'BYE' || om.teamB === 'BYE') continue
+                const pAId = parseInt(om.teamA, 10); const pBId = parseInt(om.teamB, 10)
+                if (!isNaN(pAId) && !isNaN(pBId))
+                  await window.db.createMatch({ tournamentId, round: om.round, courtNumber: om.courtNumber, playerAId: pAId, playerBId: pBId, category: 'SH' })
+              }
+            }
+            if (orphanWomen.length >= 2) {
+              const sdMatches = generateRoundRobin(orphanWomen, { tournamentId, courtCount: tournament.courtCount })
+              for (const om of sdMatches) {
+                if (!om.teamA || !om.teamB || om.teamA === 'BYE' || om.teamB === 'BYE') continue
+                const pAId = parseInt(om.teamA, 10); const pBId = parseInt(om.teamB, 10)
+                if (!isNaN(pAId) && !isNaN(pBId))
+                  await window.db.createMatch({ tournamentId, round: om.round, courtNumber: om.courtNumber, playerAId: pAId, playerBId: pBId, category: 'SD' })
+              }
             }
           }
         } else {
@@ -1638,9 +2062,12 @@ export function TournamentDetail() {
           } else if (category === 'SD') {
             playerPool = tournamentPlayerRows.filter((r) => r.gender === 'F').map((r) => r.playerId)
           }
-          if (playerPool.length < 2) continue
+          if (playerPool.length < 2) {
+            if (category) skippedCategories.push(`${category} (0 joueur éligible)`)
+            continue
+          }
 
-          let generated: Omit<Match, 'id' | 'winnerId' | 'comment'>[] = []
+          let generated: Omit<Match, 'id' | 'winnerId'>[] = []
 
           switch (tournament.format) {
             case 'round-robin':
@@ -1651,7 +2078,22 @@ export function TournamentDetail() {
               generated = generateSingleElim(playerPool, tournamentId)
               break
             case 'pool+knockout': {
-              const result = generatePoolPlusKnockout(playerPool, { tournamentId, courtCount: tournament.courtCount, poolCount: tournament.poolCount ?? 2 })
+              // Filtre les pools manuels du wizard pour ne conserver que les joueurs
+              // présents dans playerPool (ex : en SH on exclut les joueuses)
+              const poolCount = tournament.poolCount ?? 2
+              let filteredManualPools: number[][] | undefined
+              if (wizardPoolAssignments) {
+                const filtered = wizardPoolAssignments
+                  .map((pool) => pool.filter((id) => playerPool.includes(id)))
+                  .filter((pool) => pool.length >= 2)
+                filteredManualPools = filtered.length === poolCount ? filtered : undefined
+              }
+              const result = generatePoolPlusKnockout(playerPool, {
+                tournamentId,
+                courtCount: tournament.courtCount,
+                poolCount,
+                manualPools: filteredManualPools,
+              })
               generated = [...result.poolMatches, ...result.knockoutMatches]
               break
             }
@@ -1662,15 +2104,29 @@ export function TournamentDetail() {
               generated = generateRoundRobin(playerPool, { tournamentId, courtCount: tournament.courtCount })
           }
 
+          // Matchs BYE en knockout — track pour auto-avancement
+          const byeAdvancesSingles: { matchId: number; realPlayerId: number }[] = []
+
           for (const m of generated) {
             if (m.teamA && m.teamB && m.teamA !== 'BYE' && m.teamB !== 'BYE') {
               const playerAId = parseInt(m.teamA, 10)
               const playerBId = parseInt(m.teamB, 10)
               if (isNaN(playerAId) || isNaN(playerBId)) continue
-              await window.db.createMatch({ tournamentId, round: m.round, courtNumber: m.courtNumber, playerAId, playerBId, category })
+              await window.db.createMatch({ tournamentId, round: m.round, courtNumber: m.courtNumber, playerAId, playerBId, category, comment: m.comment })
             } else if (['knockout', 'double-elimination', 'pool+knockout'].includes(tournament.format)) {
-              await window.db.createPlaceholderMatch({ tournamentId, round: m.round, category })
+              const created = await window.db.createPlaceholderMatch({ tournamentId, round: m.round, category, comment: m.comment })
+              // Track les BYEs du premier tour pour auto-avancement
+              if (isKnockoutFormat && m.round === 1 && (m.teamA === 'BYE' || m.teamB === 'BYE')) {
+                const realId = m.teamA !== 'BYE' ? parseInt(m.teamA!, 10) : parseInt(m.teamB!, 10)
+                if (!isNaN(realId)) byeAdvancesSingles.push({ matchId: created.id, realPlayerId: realId })
+              }
             }
+          }
+
+          // Auto-avance les joueurs qui avaient un BYE
+          for (const { matchId, realPlayerId } of byeAdvancesSingles) {
+            await window.db.updateMatchStatus(matchId, 'completed')
+            await window.db.advanceWinner(tournamentId, matchId, realPlayerId)
           }
         }
       }
@@ -1679,6 +2135,8 @@ export function TournamentDetail() {
       setMatches(freshMatches)
       if (freshMatches.length === 0) {
         setGenerateError('Aucun match généré. Vérifiez que les joueurs sont inscrits et que les catégories correspondent aux genres disponibles.')
+      } else if (skippedCategories.length > 0) {
+        setGenerateError(`Attention : catégories ignorées (joueurs insuffisants) : ${skippedCategories.join(', ')}.`)
       }
       // La génération laisse le tournoi en DRAFT — l'utilisateur peut réorganiser puis confirmer
     } catch (err) {
@@ -1717,15 +2175,24 @@ export function TournamentDetail() {
     setMatches(freshMatches)
   }
 
+  const handleSwapPositions = async (m1: number, m2: number) => {
+    await window.db.swapMatchPositions(m1, m2)
+    const freshMatches = await window.db.getMatches(tournamentId)
+    setMatches(freshMatches)
+  }
+
   // Recharge les matchs et scores après une modification de score depuis le planning
   const handleRefresh = useCallback(async () => {
-    const [freshMatches] = await Promise.all([window.db.getMatches(tournamentId)])
+    const freshMatches = await window.db.getMatches(tournamentId)
     setMatches(freshMatches)
+    // Charge tous les scores en une seule requête
+    const allScoresArr = await window.db.getAllMatchScores(tournamentId)
     const scoresMap = new Map<number, MatchScore[]>()
-    await Promise.all(freshMatches.map(async (m) => {
-      const s = await window.db.getMatchScores(m.id)
-      scoresMap.set(m.id, s)
-    }))
+    for (const s of allScoresArr) {
+      const arr = scoresMap.get(s.matchId) ?? []
+      arr.push(s)
+      scoresMap.set(s.matchId, arr)
+    }
     setAllScores(scoresMap)
   }, [tournamentId])
 
@@ -1746,11 +2213,12 @@ export function TournamentDetail() {
 
   // ─── Onglets ───────────────────────────────────────────────────────────────
   const isElimFormat = ['knockout', 'double-elimination', 'pool+knockout'].includes(tournament.format)
+  const hasRoundRobinPhase = ['round-robin', 'americano', 'pool+knockout'].includes(tournament.format)
 
   const TABS: { id: TabId; label: string; icon: React.ElementType; show?: boolean }[] = [
     { id: 'planning',  label: 'Planning',   icon: List },
     { id: 'standings', label: 'Classement', icon: BarChart3 },
-    { id: 'pools',     label: 'Poules',     icon: LayoutGrid, show: tournament.format === 'pool+knockout' },
+    { id: 'pools',     label: 'Poules',     icon: LayoutGrid, show: hasRoundRobinPhase },
     { id: 'bracket',   label: 'Bracket',    icon: GitBranch, show: isElimFormat },
     { id: 'players',   label: 'Joueurs',    icon: Users },
   ]
@@ -1836,15 +2304,21 @@ export function TournamentDetail() {
             )}
             {/* Draft + aucun match : bouton "Générer le planning" */}
             {tournament.status === 'draft' && matches.length === 0 && (
-              <Button
-                size="sm"
-                disabled={generating || tournamentPlayers.length < 2 || !pairsReady}
-                onClick={handleGenerate}
-                title={!pairsReady ? 'Configurez d\'abord les équipes doubles' : undefined}
-              >
-                <Play size={13} className="mr-1 inline" />
-                {generating ? 'Génération…' : 'Générer le planning'}
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  disabled={generating || tournamentPlayers.length < 2 || !pairsReady}
+                  onClick={handleGenerate}
+                  title={!pairsReady ? 'Configurez d\'abord les équipes doubles' : undefined}
+                >
+                  <Play size={13} className="mr-1 inline" />
+                  {generating ? 'Génération…' : 'Générer le planning'}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setAddMatchOpen(true)}>
+                  <Plus size={13} className="mr-1 inline" />
+                  Ajouter manuellement
+                </Button>
+              </>
             )}
             {generateError && (
               <span className="font-mono text-[11px] text-red font-bold">
@@ -1867,6 +2341,10 @@ export function TournamentDetail() {
                   onClick={handleReset}
                 >
                   {resetting ? 'Réinit…' : '↺ Réinitialiser'}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setAddMatchOpen(true)}>
+                  <Plus size={13} className="mr-1 inline" />
+                  Ajouter un match
                 </Button>
                 <Button
                   size="sm"
@@ -1983,6 +2461,8 @@ export function TournamentDetail() {
                     setSwapSlot(null)
                   }
                 }}
+                onSwapPositions={(m1, m2) => { void handleSwapPositions(m1, m2) }}
+                playerTeamMap={new Map(tournamentPlayerRows.map((r) => [r.playerId, r.teamSide ?? '']))}
               />
             )}
             {tab === 'standings' && (
@@ -1992,6 +2472,7 @@ export function TournamentDetail() {
                 allScores={allScores}
                 rule={rule}
                 players={players}
+                allPlayerNames={allPlayerNames}
               />
             )}
             {tab === 'pools' && (
@@ -1999,6 +2480,7 @@ export function TournamentDetail() {
                 matches={matches}
                 allScores={allScores}
                 allPlayerNames={allPlayerNames}
+                tournamentFormat={tournament.format}
               />
             )}
             {tab === 'bracket' && (
@@ -2022,9 +2504,9 @@ export function TournamentDetail() {
             )}
             {tab === 'players' && (
               <div className="flex flex-col border-2 border-line">
-                <div className="grid grid-cols-[1fr_80px_100px] bg-ink px-4 py-3">
-                  {['Joueur', 'Genre', 'Classement'].map((h) => (
-                    <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
+                <div className="grid grid-cols-[48px_140px_120px_120px_44px_120px_1fr_80px] bg-ink px-4 py-3">
+                  {['N° Doss.', 'Nom', 'Prénom', 'Pseudo', 'G.', 'Niveau', 'Équipe', 'ELO'].map((h) => (
+                    <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo px-1">{h}</span>
                   ))}
                 </div>
                 {participantPlayers.length === 0 ? (
@@ -2034,11 +2516,22 @@ export function TournamentDetail() {
                 ) : (
                   participantPlayers.map((p, i) => (
                     <div key={p.id}
-                      className={`grid grid-cols-[1fr_80px_100px] items-center px-4 py-3
+                      className={`grid grid-cols-[48px_140px_120px_120px_44px_120px_1fr_80px] items-center px-4 py-3
                         border-b border-line-soft ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
-                      <span className="font-sans font-bold text-[14px] text-ink">{playerDisplayName(p)}</span>
-                      <span className="text-[11px] font-mono text-ink">{p.gender}</span>
-                      <span className="text-[11px] font-mono font-bold text-ink">{p.level}</span>
+                      <span className="font-mono font-bold text-[13px] text-ink-3 px-1">
+                        {p.playerNumber != null ? String(p.playerNumber).padStart(2, '0') : '—'}
+                      </span>
+                      <span className="font-sans font-black text-[14px] text-ink uppercase tracking-[-0.01em] px-1">
+                        {p.lastName.toUpperCase()}
+                      </span>
+                      <span className="font-sans text-[14px] text-ink-2 px-1">{p.firstName}</span>
+                      <span className="font-mono text-[12px] text-ink-3 truncate px-1">
+                        {p.pseudo ? `"${p.pseudo}"` : <span className="text-ink-3/40">—</span>}
+                      </span>
+                      <Tag label={p.gender === 'M' ? 'H' : 'F'} color={p.gender === 'M' ? 'H' : 'F'} className="w-7 h-7 justify-center px-0 py-0" />
+                      <span className="text-[11px] font-mono font-bold text-ink-2 uppercase px-1">{p.level}</span>
+                      <span className="font-sans text-[12px] text-ink-2 truncate px-1">{p.club || '—'}</span>
+                      <span className="font-mono text-[12px] text-ink-3 px-1">{p.elo ?? '—'}</span>
                     </div>
                   ))
                 )}
@@ -2059,6 +2552,17 @@ export function TournamentDetail() {
           onSave={(pairs) => setDoublesTeams(pairs)}
         />
       )}
+
+      {/* Modal ajout manuel de match */}
+      <AddMatchModal
+        isOpen={addMatchOpen}
+        onClose={() => setAddMatchOpen(false)}
+        tournamentId={tournamentId}
+        tournamentPlayerRows={tournamentPlayerRows}
+        allPlayerNames={allPlayerNames}
+        courtCount={tournament.courtCount}
+        onCreated={() => { setAddMatchOpen(false); void handleRefresh() }}
+      />
     </div>
   )
 }

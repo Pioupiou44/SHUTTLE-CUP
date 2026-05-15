@@ -4,9 +4,10 @@ import { useTournamentsStore } from '@/store/tournamentsStore'
 import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
 import { Button, Input, Tag, Badge } from '@/components/ui'
-import { ChevronRight, ChevronLeft, Users, Trophy, Settings, AlignLeft, Shield, ChevronUp, ChevronDown, ChevronsUpDown, Shuffle, Plus, X, Layers2 } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Users, Trophy, Settings, AlignLeft, Shield, ChevronUp, ChevronDown, ChevronsUpDown, Shuffle, Plus, X, Layers2, LayoutGrid } from 'lucide-react'
 import { playerDisplayName, FORMAT_LABELS, CATEGORY_LABELS } from '@/types/domain'
 import { countRoundRobinMatches } from '@/engine/generators/roundRobin'
+import { splitIntoPools } from '@/engine/generators/poolPlusKnockout'
 import { nextPowerOf2 } from '@/engine/generators/singleElim'
 import type { TournamentFormat, MatchCategory, Player, ScoringRule } from '@/types/domain'
 
@@ -31,7 +32,10 @@ interface WizardData {
   poolCount: number
   // Étape 5 — Règles
   scoringRuleId: number | null
-  // Étape 6 — Composition doubles
+  // Étape 6/7 — Poules (pool+knockout uniquement)
+  poolAssignments: number[][]                                     // joueurs (singles)
+  doublesPoolAssignments: Partial<Record<MatchCategory, number[][]>> // indices de paires (doubles)
+  // Étape 7 — Composition doubles
   doublesTeams: Partial<Record<MatchCategory, [number, number][]>>
 }
 
@@ -44,23 +48,50 @@ const INITIAL: WizardData = {
   teamNames: ['Équipe A', 'Équipe B'],
   selectedPlayerIds: [],
   teamAssignments: {},
-  format: 'round-robin',
+  format: 'pool+knockout',
   categories: [],
   poolCount: 2,
   scoringRuleId: null,
+  poolAssignments: [],
+  doublesPoolAssignments: {},
   doublesTeams: {},
 }
 
 const DOUBLES_CATS: MatchCategory[] = ['DH', 'DD', 'DX']
 
-const FORMAT_OPTIONS: { value: TournamentFormat; label: string }[] = [
-  { value: 'round-robin',        label: 'Poules — Round Robin' },
+const FORMAT_STEPS: Partial<Record<TournamentFormat, string[]>> = {
+  'pool+knockout': [
+    'Phase de poules : chaque joueur joue contre tous les autres dans son groupe',
+    'Une fois tous les matchs de poules terminés, cliquer "Lancer le bracket"',
+    'Le tableau final (demi-finales, finale…) est généré automatiquement selon le classement',
+    'Les gagnants avancent automatiquement jusqu’à la finale',
+  ],
+  'round-robin': [
+    'Tous les matchs sont générés en une seule fois dès le départ',
+    'Chaque joueur joue contre tous les autres une fois',
+    'Le classement final est établi par points (victoire = 2 pts, défaite = 1 pt)',
+    'Pas de phase éliminatoire — le vainqueur est celui avec le plus de points',
+  ],
+  'knockout': [
+    'Le tableau est généré en une seule fois (puissances de 2, BYE si impair)',
+    'Le perdant de chaque match est éliminé, le gagnant avance automatiquement',
+    'La progression continue jusqu’à la finale',
+  ],
+  'americano': [
+    'Les partenaires et adversaires changent à chaque ronde',
+    'L’appéariement se fait selon les scores cumulatifs',
+    'Adapté en doubles (DH, DD, DX) pour un maximum de variété',
+  ],
+}
+
+const FORMAT_OPTIONS: { value: TournamentFormat; label: string; disabled?: boolean }[] = [
+  { value: 'pool+knockout',      label: '⭐ Poules + Finale (recommandé)' },
+  { value: 'round-robin',        label: 'Poules uniquement — Round Robin' },
   { value: 'knockout',           label: 'Élimination directe' },
   { value: 'double-elimination', label: 'Double élimination' },
-  { value: 'pool+knockout',      label: 'Poules + Élimination (recommandé)' },
   { value: 'americano',          label: 'Américano' },
-  { value: 'swiss',              label: 'Système suisse' },
-  { value: 'king-of-court',      label: 'Roi du court' },
+  { value: 'swiss',              label: 'Système suisse',  disabled: true },
+  { value: 'king-of-court',      label: 'Roi du court',    disabled: true },
 ]
 
 const BASE_STEPS = [
@@ -69,7 +100,8 @@ const BASE_STEPS = [
   { id: 3, label: 'Équipes',     icon: Shield },
   { id: 4, label: 'Format',      icon: Trophy },
   { id: 5, label: 'Règles',      icon: Settings },
-  { id: 6, label: 'Composition', icon: Layers2 },
+  { id: 7, label: 'Composition', icon: Layers2 },    // Composition avant Poules pour les doubles
+  { id: 6, label: 'Poules',      icon: LayoutGrid },
 ]
 
 // ─── Couleurs des équipes (style inline car count dynamique) ─────────────────
@@ -192,9 +224,21 @@ function TournamentPreview({ data, selectedPlayers, selectedRule }: {
     warnings.push('Élimination directe : recommandé avec au moins 4 joueurs.')
   }
 
-  if (data.format === 'pool+knockout' && data.poolCount > Math.floor(n / 2)) {
+  if (data.format === 'round-robin' && n < 3) {
+    warnings.push(`Minimum 3 joueurs requis pour un tournoi toutes rondes (actuellement ${n}).`)
+  }
+
+  if (data.format === 'americano' && n < 4) {
+    warnings.push(`Minimum 4 joueurs requis pour l'américano (actuellement ${n}).`)
+  }
+
+  if (data.format === 'pool+knockout' && n < data.poolCount * 3) {
     warnings.push(
-      `${data.poolCount} groupes pour ${n} joueurs : certains groupes auront 1 seul joueur. Réduisez le nombre de groupes.`
+      `${data.poolCount} poules × 3 joueurs minimum = ${data.poolCount * 3} joueurs requis, mais seulement ${n} sélectionnés. Ajoutez des joueurs ou réduisez le nombre de poules.`
+    )
+  } else if (data.format === 'pool+knockout' && data.poolCount > Math.floor(n / 2)) {
+    warnings.push(
+      `${data.poolCount} groupes pour ${n} joueurs : certains groupes n'auront que 2 joueurs (recommandé : 3–6 par poule).`
     )
   }
 
@@ -754,15 +798,32 @@ function Step3({ data, onChange }: { data: WizardData; onChange: (d: Partial<Wiz
         <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">Format de compétition</p>
         {FORMAT_OPTIONS.map((opt) => (
           <div key={opt.value}
-            onClick={() => onChange({ format: opt.value })}
-            className={`px-4 py-3 border-2 cursor-pointer transition-colors
-              ${data.format === opt.value ? 'border-blue bg-blue/5' : 'border-line hover:border-blue/50 bg-bg'}`}
+            onClick={() => !opt.disabled && onChange({ format: opt.value })}
+            className={`px-4 py-3 border-2 transition-colors
+              ${opt.disabled
+                ? 'border-line-soft bg-bg-alt opacity-50 cursor-not-allowed'
+                : data.format === opt.value
+                  ? 'border-blue bg-blue/5 cursor-pointer'
+                  : 'border-line hover:border-blue/50 bg-bg cursor-pointer'}`}
           >
             <div className="flex items-center justify-between">
               <span className="font-sans font-bold text-[14px] text-ink">{opt.label}</span>
-              {data.format === opt.value && <Badge variant="active">Sélectionné</Badge>}
+              {opt.disabled && <Badge variant="default">Bientôt</Badge>}
+              {!opt.disabled && data.format === opt.value && <Badge variant="active">Sélectionné</Badge>}
             </div>
-            <p className="font-sans text-[12px] text-ink-3 mt-0.5">{FORMAT_LABELS[opt.value]}</p>
+            <p className="font-sans text-[12px] text-ink-3 mt-0.5">
+              {opt.disabled ? 'Non disponible dans cette version' : FORMAT_LABELS[opt.value]}
+            </p>
+            {!opt.disabled && data.format === opt.value && FORMAT_STEPS[opt.value] && (
+              <ol className="mt-2 flex flex-col gap-1">
+                {FORMAT_STEPS[opt.value]!.map((step, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="shrink-0 w-4 h-4 mt-0.5 bg-blue text-white font-mono font-bold text-[9px] flex items-center justify-center">{i + 1}</span>
+                    <span className="font-sans text-[11px] text-ink-2">{step}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
         ))}
       </div>
@@ -991,7 +1052,404 @@ function PlayerMiniCard({
   )
 }
 
-// ─── Step 6 — Composition des équipes doubles ────────────────────────────────
+// ─── Step 6 — Composition des poules ─────────────────────────────────────────
+
+const POOL_COLORS = ['#0047FF', '#0a0a0a', '#D97500', '#E60022', '#00C24A', '#4a4a4a', '#6600cc', '#008080']
+
+/** Dispatch vers le mode doubles ou singles selon les catégories sélectionnées */
+function StepPools({ data, players, onChange }: {
+  data: WizardData
+  players: Player[]
+  onChange: (d: Partial<WizardData>) => void
+}) {
+  const doublesCats = data.categories.filter((c) => DOUBLES_CATS.includes(c))
+  if (doublesCats.length > 0) {
+    return <StepPoolsDoubles data={data} players={players} onChange={onChange} doublesCats={doublesCats} />
+  }
+  return <StepPoolsSingles data={data} players={players} onChange={onChange} />
+}
+
+// ─── Mode singles — joueurs individuels ──────────────────────────────────────
+
+function StepPoolsSingles({ data, players, onChange }: {
+  data: WizardData
+  players: Player[]
+  onChange: (d: Partial<WizardData>) => void
+}) {
+  const selectedPlayers = players.filter((p) => data.selectedPlayerIds.includes(p.id))
+  const poolCount = data.poolCount
+
+  // Drag state local (pas besoin de persister)
+  const [dragPlayerId, setDragPlayerId] = useState<number | null>(null)
+  const [dragOverPool, setDragOverPool] = useState<number | null>(null)
+
+  // Initialise (ou réinitialise) aléatoirement si la composition ne correspond plus
+  useEffect(() => {
+    const assigned = data.poolAssignments.flat()
+    const isValid =
+      data.poolAssignments.length === poolCount &&
+      assigned.length === data.selectedPlayerIds.length &&
+      data.selectedPlayerIds.every((id) => assigned.includes(id))
+    if (!isValid) {
+      // Tirage aléatoire par défaut — fonctionne même sans niveau renseigné
+      const shuffled = [...selectedPlayers].sort(() => Math.random() - 0.5)
+      onChange({ poolAssignments: splitIntoPools(shuffled.map((p) => p.id), poolCount) })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poolCount, data.selectedPlayerIds.length])
+
+  const handleShuffle = () => {
+    const shuffled = [...selectedPlayers].sort(() => Math.random() - 0.5)
+    onChange({ poolAssignments: splitIntoPools(shuffled.map((p) => p.id), poolCount) })
+  }
+
+  const movePlayer = (playerId: number, toPool: number) => {
+    if (toPool < 0 || toPool >= poolCount) return
+    const next = data.poolAssignments.map((pool) => pool.filter((id) => id !== playerId))
+    next[toPool] = [...(next[toPool] ?? []), playerId]
+    onChange({ poolAssignments: next })
+  }
+
+  const handleDrop = (toPool: number) => {
+    if (dragPlayerId !== null) movePlayer(dragPlayerId, toPool)
+    setDragPlayerId(null)
+    setDragOverPool(null)
+  }
+
+  // Protège contre un état transitoire avant l'effet d'initialisation
+  const assignments: number[][] =
+    data.poolAssignments.length === poolCount
+      ? data.poolAssignments
+      : Array.from({ length: poolCount }, () => [])
+
+  const anyTooSmall = assignments.some((p) => p.length < 3)
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* En-tête */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-black uppercase text-[14px] tracking-[-0.01em] text-ink">Composition des poules</p>
+          <p className="font-sans text-[12px] text-ink-3 mt-0.5">
+            Glissez-déposez les joueurs pour les déplacer entre les groupes.
+            Recommandé : 3–6 joueurs par poule.
+          </p>
+        </div>
+        <button
+          onClick={handleShuffle}
+          className="shrink-0 flex items-center gap-2 px-4 py-2 bg-ink text-green-fluo font-black uppercase text-[11px] tracking-[0.05em] border-2 border-ink hover:opacity-80"
+        >
+          <Shuffle size={12} />
+          Aléatoire
+        </button>
+      </div>
+
+      {anyTooSmall && (
+        <div className="px-4 py-3 border-2 border-warn bg-warn/10 font-mono text-[11px] font-bold uppercase text-warn tracking-[0.05em]">
+          ⚠ Certains groupes ont moins de 3 joueurs — le minimum recommandé est 3 joueurs par poule.
+        </div>
+      )}
+
+      {/* Colonnes des groupes */}
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: `repeat(${Math.min(poolCount, 4)}, 1fr)` }}
+      >
+        {assignments.map((poolIds, poolIdx) => {
+          const groupLetter = String.fromCharCode(65 + poolIdx)
+          const dotColor = POOL_COLORS[poolIdx] ?? POOL_COLORS[POOL_COLORS.length - 1]
+          const tooSmall = poolIds.length < 2
+          const isDragTarget = dragOverPool === poolIdx
+          const poolPlayers = poolIds
+            .map((id) => players.find((p) => p.id === id))
+            .filter((p): p is Player => p !== undefined)
+
+          return (
+            <div
+              key={poolIdx}
+              className={`border-2 transition-colors ${
+                isDragTarget
+                  ? 'border-green-fluo bg-green-fluo/5'
+                  : tooSmall && poolIds.length > 0
+                    ? 'border-warn'
+                    : 'border-line'
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDragOverPool(poolIdx) }}
+              onDragLeave={(e) => {
+                // Ne pas réinitialiser si on survole un enfant
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverPool(null)
+              }}
+              onDrop={() => handleDrop(poolIdx)}
+            >
+              {/* Header coloré */}
+              <div
+                className="px-3 py-2 flex items-center justify-between"
+                style={{ backgroundColor: dotColor }}
+              >
+                <span className="font-mono font-bold text-[11px] uppercase tracking-[0.08em] text-white">
+                  Groupe {groupLetter}
+                </span>
+                <span className="font-mono text-[11px] text-white/70">
+                  {poolIds.length} joueur{poolIds.length > 1 ? 's' : ''}
+                </span>
+              </div>
+
+              {/* Zone de dépôt vide */}
+              <div
+                className={`divide-y divide-line-soft min-h-[48px] ${isDragTarget && poolPlayers.length === 0 ? 'bg-green-fluo/10' : ''}`}
+              >
+                {poolPlayers.map((player) => {
+                  const isDragging = dragPlayerId === player.id
+                  return (
+                    <div
+                      key={player.id}
+                      draggable
+                      onDragStart={() => { setDragPlayerId(player.id); setDragOverPool(null) }}
+                      onDragEnd={() => { setDragPlayerId(null); setDragOverPool(null) }}
+                      className={`flex items-center gap-2 px-2 py-2.5 cursor-grab active:cursor-grabbing select-none transition-opacity
+                        ${isDragging ? 'opacity-30' : 'bg-bg hover:bg-bg-alt'}`}
+                    >
+                      {/* Poignée de drag */}
+                      <span className="text-ink-3 flex-shrink-0" style={{ fontSize: 10, lineHeight: 1 }}>⠿</span>
+                      <span className="flex-1 font-sans text-[13px] text-ink truncate min-w-0">
+                        {playerDisplayName(player)}
+                      </span>
+                    </div>
+                  )
+                })}
+                {poolPlayers.length === 0 && (
+                  <div className={`px-3 py-4 text-center font-sans text-[12px] text-ink-3 italic ${isDragTarget ? 'text-green' : ''}`}>
+                    {isDragTarget ? 'Déposer ici' : 'Aucun joueur'}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <p className="font-sans text-[11px] text-ink-3">
+        Faites glisser un joueur vers un autre groupe pour le déplacer. Le bouton "Aléatoire" redistribue tous les joueurs de façon aléatoire.
+      </p>
+    </div>
+  )
+}
+
+// ─── Mode doubles — paires ────────────────────────────────────────────────────
+
+function StepPoolsDoubles({ data, players, onChange, doublesCats }: {
+  data: WizardData
+  players: Player[]
+  onChange: (d: Partial<WizardData>) => void
+  doublesCats: MatchCategory[]
+}) {
+  const poolCount = data.poolCount
+  const [activeTab, setActiveTab] = useState<MatchCategory>(doublesCats[0]!)
+  const [dragPairIdx, setDragPairIdx] = useState<number | null>(null)
+  const [dragOverPool, setDragOverPool] = useState<number | null>(null)
+
+  const getPairs = (cat: MatchCategory): [number, number][] =>
+    ((data.doublesTeams[cat] ?? []) as [number, number][]).filter(([a, b]) => a > 0 && b > 0 && a !== b)
+
+  const getAssignments = (cat: MatchCategory): number[][] => {
+    const pairs = getPairs(cat)
+    const existing = data.doublesPoolAssignments?.[cat]
+    if (!existing || existing.flat().length !== pairs.length || existing.length !== poolCount) {
+      return splitIntoPools(pairs.map((_, i) => i), poolCount)
+    }
+    return existing
+  }
+
+  const setAssignments = (cat: MatchCategory, assignments: number[][]) => {
+    onChange({ doublesPoolAssignments: { ...data.doublesPoolAssignments, [cat]: assignments } })
+  }
+
+  // Auto-initialise les assignments quand les paires ou le nombre de poules changent
+  const pairCountsKey = doublesCats.map((cat) => getPairs(cat).length).join(',')
+  useEffect(() => {
+    const updates: Partial<Record<MatchCategory, number[][]>> = {}
+    let needsUpdate = false
+    for (const cat of doublesCats) {
+      const pairs = getPairs(cat)
+      const existing = data.doublesPoolAssignments?.[cat]
+      if (!existing || existing.flat().length !== pairs.length || existing.length !== poolCount) {
+        const indices = pairs.map((_, i) => i).sort(() => Math.random() - 0.5)
+        updates[cat] = splitIntoPools(indices, poolCount)
+        needsUpdate = true
+      }
+    }
+    if (needsUpdate) {
+      onChange({ doublesPoolAssignments: { ...data.doublesPoolAssignments, ...updates } })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poolCount, pairCountsKey, doublesCats.join(',')])
+
+  const handleShuffle = () => {
+    const pairs = getPairs(activeTab)
+    const indices = pairs.map((_, i) => i).sort(() => Math.random() - 0.5)
+    setAssignments(activeTab, splitIntoPools(indices, poolCount))
+  }
+
+  const movePair = (pairIdx: number, toPool: number) => {
+    if (toPool < 0 || toPool >= poolCount) return
+    const current = getAssignments(activeTab)
+    const next = current.map((pool) => pool.filter((i) => i !== pairIdx))
+    next[toPool] = [...(next[toPool] ?? []), pairIdx]
+    setAssignments(activeTab, next)
+  }
+
+  const handleDrop = (toPool: number) => {
+    if (dragPairIdx !== null) movePair(dragPairIdx, toPool)
+    setDragPairIdx(null)
+    setDragOverPool(null)
+  }
+
+  const activePairs = getPairs(activeTab)
+  const assignments: number[][] =
+    getAssignments(activeTab).length === poolCount
+      ? getAssignments(activeTab)
+      : Array.from({ length: poolCount }, () => [])
+
+  const anyTooSmall = assignments.some((p) => p.length < 2)
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* En-tête */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-black uppercase text-[14px] tracking-[-0.01em] text-ink">Composition des poules</p>
+          <p className="font-sans text-[12px] text-ink-3 mt-0.5">
+            Glissez-déposez les paires entre les groupes. Recommandé : 3–4 paires par poule.
+          </p>
+        </div>
+        <button
+          onClick={handleShuffle}
+          className="shrink-0 flex items-center gap-2 px-4 py-2 bg-ink text-green-fluo font-black uppercase text-[11px] tracking-[0.05em] border-2 border-ink hover:opacity-80"
+        >
+          <Shuffle size={12} />
+          Aléatoire
+        </button>
+      </div>
+
+      {/* Onglets catégories doubles (si plusieurs) */}
+      {doublesCats.length > 1 && (
+        <div className="flex gap-0 border-2 border-line self-start">
+          {doublesCats.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveTab(cat)}
+              className={`px-4 py-2 font-mono font-bold text-[11px] uppercase tracking-[0.08em] transition-colors
+                ${activeTab === cat ? 'bg-ink text-green-fluo' : 'bg-bg text-ink-3 hover:text-ink'}`}
+            >
+              {CATEGORY_LABELS[cat]}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activePairs.length === 0 && (
+        <div className="px-4 py-3 border-2 border-warn bg-warn/10 font-mono text-[11px] font-bold uppercase text-warn tracking-[0.05em]">
+          ⚠ Aucune paire configurée pour {CATEGORY_LABELS[activeTab]}. Retournez à l'étape Composition.
+        </div>
+      )}
+
+      {anyTooSmall && activePairs.length > 0 && (
+        <div className="px-4 py-3 border-2 border-warn bg-warn/10 font-mono text-[11px] font-bold uppercase text-warn tracking-[0.05em]">
+          ⚠ Certains groupes ont moins de 2 paires — recommandé : 3 paires minimum par poule.
+        </div>
+      )}
+
+      {/* Colonnes des groupes */}
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: `repeat(${Math.min(poolCount, 4)}, 1fr)` }}
+      >
+        {assignments.map((poolPairIndices, poolIdx) => {
+          const groupLetter = String.fromCharCode(65 + poolIdx)
+          const dotColor = POOL_COLORS[poolIdx] ?? POOL_COLORS[POOL_COLORS.length - 1]
+          const tooSmall = poolPairIndices.length < 2
+          const isDragTarget = dragOverPool === poolIdx
+
+          return (
+            <div
+              key={poolIdx}
+              className={`border-2 transition-colors ${
+                isDragTarget
+                  ? 'border-green-fluo bg-green-fluo/5'
+                  : tooSmall && poolPairIndices.length > 0
+                    ? 'border-warn'
+                    : 'border-line'
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDragOverPool(poolIdx) }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverPool(null)
+              }}
+              onDrop={() => handleDrop(poolIdx)}
+            >
+              {/* Header coloré */}
+              <div
+                className="px-3 py-2 flex items-center justify-between"
+                style={{ backgroundColor: dotColor }}
+              >
+                <span className="font-mono font-bold text-[11px] uppercase tracking-[0.08em] text-white">
+                  Groupe {groupLetter}
+                </span>
+                <span className="font-mono text-[11px] text-white/70">
+                  {poolPairIndices.length} paire{poolPairIndices.length > 1 ? 's' : ''}
+                </span>
+              </div>
+
+              {/* Paires dans ce groupe */}
+              <div
+                className={`divide-y divide-line-soft min-h-[48px] ${isDragTarget && poolPairIndices.length === 0 ? 'bg-green-fluo/10' : ''}`}
+              >
+                {poolPairIndices.map((pairIdx) => {
+                  const pair = activePairs[pairIdx]
+                  if (!pair) return null
+                  const isDragging = dragPairIdx === pairIdx
+                  const [aId, bId] = pair
+                  const pA = players.find((p) => p.id === aId)
+                  const pB = players.find((p) => p.id === bId)
+                  return (
+                    <div
+                      key={pairIdx}
+                      draggable
+                      onDragStart={() => { setDragPairIdx(pairIdx); setDragOverPool(null) }}
+                      onDragEnd={() => { setDragPairIdx(null); setDragOverPool(null) }}
+                      className={`flex items-start gap-2 px-2 py-2.5 cursor-grab active:cursor-grabbing select-none transition-opacity
+                        ${isDragging ? 'opacity-30' : 'bg-bg hover:bg-bg-alt'}`}
+                    >
+                      <span className="text-ink-3 flex-shrink-0 mt-0.5" style={{ fontSize: 10, lineHeight: 1 }}>⠿</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-sans text-[12px] font-bold text-ink truncate">
+                          {pA ? playerDisplayName(pA) : `#${aId}`}
+                        </p>
+                        <p className="font-sans text-[11px] text-ink-2 truncate">
+                          {pB ? playerDisplayName(pB) : `#${bId}`}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+                {poolPairIndices.length === 0 && (
+                  <div className={`px-3 py-4 text-center font-sans text-[12px] text-ink-3 italic ${isDragTarget ? 'text-green' : ''}`}>
+                    {isDragTarget ? 'Déposer ici' : 'Aucune paire'}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <p className="font-sans text-[11px] text-ink-3">
+        Faites glisser une paire vers un autre groupe pour la déplacer. Le bouton "Aléatoire" redistribue toutes les paires de façon aléatoire.
+      </p>
+    </div>
+  )
+}
+
+// ─── Step 7 — Composition des équipes doubles ────────────────────────────────
 
 function Step6Composition({ data, players, onChange }: {
   data: WizardData
@@ -1343,10 +1801,15 @@ export function TournamentWizard() {
   const [data, setData] = useState<WizardData>(INITIAL)
   const [saving, setSaving] = useState(false)
 
-  // Step 3 (Équipes) toujours visible — contient le toggle teamMode
-  // Step 6 (Composition) visible uniquement si des catégories doubles sont sélectionnées
+  // Step 6 (Poules) uniquement en mode pool+knockout hors mode équipes
+  // Step 7 (Composition) visible uniquement si des catégories doubles sont sélectionnées
   const hasDoublesCats = data.categories.some((c) => DOUBLES_CATS.includes(c))
-  const STEPS = BASE_STEPS.filter((s) => s.id !== 6 || hasDoublesCats)
+  const hasPoolFormat = data.format === 'pool+knockout' && !data.teamMode
+  const STEPS = BASE_STEPS.filter((s) => {
+    if (s.id === 6) return hasPoolFormat
+    if (s.id === 7) return hasDoublesCats
+    return true
+  })
 
   const stepIds = STEPS.map((s) => s.id)
   const currentStepIdx = stepIds.indexOf(step)
@@ -1373,9 +1836,16 @@ export function TournamentWizard() {
     if (step === 1) return data.name.trim().length > 0
     if (step === 2) return data.selectedPlayerIds.length >= 2
     if (step === 3) return true  // Équipes — toggle optionnel
-    if (step === 4) return true  // Format
+    if (step === 4) {            // Format — vérifie compatibilité avec le nb de joueurs
+      const n = data.selectedPlayerIds.length
+      if (data.format === 'round-robin' && n < 3) return false
+      if (data.format === 'americano'   && n < 4) return false
+      if (data.format === 'pool+knockout' && n < data.poolCount * 3) return false
+      return true
+    }
     if (step === 5) return true  // Règles
-    if (step === 6) return true  // Composition — optionnel
+    if (step === 6) return true  // Poules — avertissement informatif seulement
+    if (step === 7) return true  // Composition — optionnel
     return false
   }
 
@@ -1418,6 +1888,10 @@ export function TournamentWizard() {
       navigate(`/tournaments/${tournament.id}`, {
         state: {
           doublesTeams: data.doublesTeams,
+          // Poules singles : uniquement si pas de catégories doubles
+          poolAssignments: hasPoolFormat && !hasDoublesCats ? data.poolAssignments : undefined,
+          // Poules doubles : indices de paires par catégorie
+          doublesPoolAssignments: hasPoolFormat && hasDoublesCats ? data.doublesPoolAssignments : undefined,
           autoGenerate: true,
         },
       })
@@ -1469,13 +1943,14 @@ export function TournamentWizard() {
         </div>
 
         {/* Contenu étape */}
-        <div className={step === 6 ? '' : 'max-w-xl'}>
+        <div className={step === 6 || step === 7 ? '' : 'max-w-xl'}>
           {step === 1 && <Step1 data={data} onChange={update} />}
           {step === 2 && <Step2 data={data} players={players} onChange={update} />}
           {step === 3 && <Step3Teams data={data} players={players} onChange={update} />}
           {step === 4 && <Step3 data={data} onChange={update} />}
           {step === 5 && <Step4 data={data} rules={rules} onChange={update} />}
-          {step === 6 && <Step6Composition data={data} players={players} onChange={update} />}
+          {step === 6 && <StepPools data={data} players={players} onChange={update} />}
+          {step === 7 && <Step6Composition data={data} players={players} onChange={update} />}
         </div>
 
         {/* Navigation */}

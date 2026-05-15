@@ -18,6 +18,8 @@ export interface PoolKnockoutConfig {
   poolCount: number
   /** Nombre de qualifiés par groupe — défaut : 2 */
   qualifiersPerPool?: number
+  /** Assignation manuelle des joueurs aux groupes (fourni par le wizard si personnalisé) */
+  manualPools?: number[][]
 }
 
 export interface PoolKnockoutResult {
@@ -52,7 +54,10 @@ export function generatePoolPlusKnockout(
   const poolCount = Math.max(2, config.poolCount)
   const qualifiers = config.qualifiersPerPool ?? 2
 
-  const pools = splitIntoPools(playerIds, poolCount)
+  // Utilise l'assignation manuelle (wizard) si fournie et cohérente, sinon serpentin automatique
+  const pools = (config.manualPools && config.manualPools.length === poolCount)
+    ? config.manualPools
+    : splitIntoPools(playerIds, poolCount)
 
   // Phase 1 : Round Robin par groupe
   // Chaque match obtient un commentaire "Groupe X" pour distinguer les poules
