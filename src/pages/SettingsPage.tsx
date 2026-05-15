@@ -319,7 +319,7 @@ export function SettingsPage() {
             </div>
             <div className="flex items-baseline justify-between">
               <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Version</span>
-              <span className="font-sans text-[14px] text-ink">0.1.0</span>
+              <span className="font-sans text-[14px] text-ink">1.0.1 <span className="font-mono text-[11px] text-ink-3">BETA</span></span>
             </div>
             <div className="flex items-baseline justify-between">
               <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Licence</span>

@@ -4,6 +4,8 @@ Application de bureau pour la gestion complète de tournois de badminton en club
 
 **Stack** : Electron 30 · React 18 · TypeScript strict · Vite · Zustand · better-sqlite3 · Tailwind CSS
 
+🌐 **Site officiel** : [shuttle.cup.alexisandcom.fr](https://shuttle.cup.alexisandcom.fr)
+
 ---
 
 ## Sommaire
@@ -168,12 +170,14 @@ shuttlecup/
 ├── public/
 │   └── fonts/                   # Inter + JetBrains Mono (locaux)
 │
+├── build/
+│   └── notarize.js              # Hook afterSign : notarisation Apple avec notarytool
 ├── index.html
 ├── vite.config.ts
 ├── tailwind.config.ts
 ├── tsconfig.json
 ├── tsconfig.electron.json
-└── electron-builder.config.js
+└── electron-builder.js          # Config electron-builder (packaging multi-plateforme)
 ```
 
 ---
@@ -460,21 +464,46 @@ Activé via `tournament.teamMode === 1`. Les joueurs sont répartis dans des éq
 
 ## Packaging & distribution
 
-Configuré via `electron-builder.config.js` :
+Site de téléchargement : **[shuttle.cup.alexisandcom.fr](https://shuttle.cup.alexisandcom.fr)**
+
+Config dans `electron-builder.js` (doit s'appeler `.js`, pas `.config.js` — requis par electron-builder v24).
 
 ```bash
 # Préparer le build
+export NVM_DIR="$HOME/.nvm" && . "/opt/homebrew/opt/nvm/nvm.sh" && nvm use 20
 npm run build
 
-# Packager (depuis le répertoire du projet)
-npx electron-builder --win
+# macOS — DMG arm64 (Apple Silicon) + x64 (Intel), signés + notarisés
+npx electron-builder --mac --arm64 --x64
+
+# Windows — installeur NSIS x64
+npx electron-builder --win --x64
+
+# Linux — AppImage + .deb x64
+npx electron-builder --linux --x64
 ```
 
-Les artefacts sont générés dans `release/`.
+Les artefacts sont générés dans `release/` (ignoré par git) :
 
-**Cibles Windows** :
-- `msix` (Microsoft Store / déploiement entreprise)
-- `nsis` (installeur classique, avec choix du répertoire)
+| Fichier | Plateforme |
+|---------|------------|
+| `ShuttleCup-{version}-arm64.dmg` | macOS Apple Silicon |
+| `ShuttleCup-{version}.dmg` | macOS Intel x64 |
+| `ShuttleCup Setup {version}.exe` | Windows x64 (NSIS) |
+| `ShuttleCup-{version}.AppImage` | Linux x64 |
+| `shuttlecup_{version}_amd64.deb` | Linux Debian/Ubuntu |
+
+### Notarisation macOS
+
+Le hook `build/notarize.js` (déclenché via `afterSign`) soumet l'`.app` à Apple avec `notarytool` avant la création du DMG. Variables d'environnement requises :
+
+```bash
+export APPLE_ID="votre@apple.id"
+export APPLE_TEAM_ID="XXXXXXXXXX"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+```
+
+> La clé `notarize: false` dans la config mac est **obligatoire** pour désactiver le mécanisme intégré de electron-builder v24 (qui crashe si la clé est absente).
 
 **Points importants** :
 - `better-sqlite3` est décompressé hors de l'ASAR (`asarUnpack`) — obligatoire pour les modules natifs
@@ -492,13 +521,13 @@ Les artefacts sont générés dans `release/`.
 | **3 · Wizard tournoi** | ✅ | 6 étapes, mode interclub, composition doubles, auto-génération |
 | **4 · Planning** | ✅ | Vue planning, permutation matchs, mode interclub round-robin N équipes |
 | **5 · Arbitrage** | ✅ | Saisie score, raccourcis clavier, avancement bracket |
-| **6 · Règles de scoring** | ⏳ | Éditeur de règles custom |
-| **7 · Bracket visuel** | ⏳ | Vue tableau d'élimination interactive |
-| **8 · Classements** | ⏳ | Classements poules + general |
-| **9 · Impression** | ⏳ | Templates `@media print` |
-| **10 · Archives** | ⏳ | Historique tournois, export CSV |
-| **11 · Tests** | ⏳ | Vitest pour l'engine (générateurs, scoring, pairing) |
-| **12 · Packaging** | ⏳ | MSIX + GitHub Actions CI/CD |
+| **6 · Distribution v1.0.1-beta** | ✅ | macOS (arm64 + x64 notarisés), Windows NSIS, Linux AppImage + deb |
+| **7 · Règles de scoring** | ⏳ | Éditeur de règles custom |
+| **8 · Bracket visuel** | ⏳ | Vue tableau d'élimination interactive |
+| **9 · Classements** | ⏳ | Classements poules + general |
+| **10 · Impression** | ⏳ | Templates `@media print` |
+| **11 · Archives** | ⏳ | Historique tournois, export CSV |
+| **12 · Tests** | ⏳ | Vitest pour l'engine (générateurs, scoring, pairing) |
 
 ---
 

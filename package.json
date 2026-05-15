@@ -1,6 +1,6 @@
 {
   "name": "shuttlecup",
-  "version": "0.1.0",
+  "version": "1.0.1-beta",
   "private": true,
   "description": "Gestionnaire de tournois de badminton pour clubs",
   "main": "dist-electron/main.js",
@@ -10,7 +10,15 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "preview": "vite preview",
     "rebuild-natives": "electron-rebuild -f -w better-sqlite3",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "icons": "node build/create-icons.js",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac --arm64 --x64",
+    "dist:mac:arm64": "npm run build && electron-builder --mac --arm64",
+    "dist:mac:x64": "npm run build && electron-builder --mac --x64",
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:linux": "npm run build && electron-builder --linux --x64",
+    "dist:all": "npm run build && electron-builder --mac --win --linux"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
@@ -23,6 +31,7 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^3.6.0",
     "@types/better-sqlite3": "^7.6.9",
     "@types/node": "^20.11.30",

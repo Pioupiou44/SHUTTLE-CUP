@@ -381,16 +381,6 @@ const TEAM_COLORS_HEX: string[] = [
   '#008080', // H — teal
 ]
 
-/** Retourne la couleur hex de l'équipe-préparation d'un joueur, ou null si non assigné */
-function getTeamColor(teamStr: string | undefined, playerTeamMap: Map<number, string>): string | null {
-  if (!teamStr || teamStr === 'BYE') return null
-  const ids = teamStr.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
-  const side = ids.length > 0 ? playerTeamMap.get(ids[0]) : undefined
-  if (!side) return null
-  const idx = side.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0)
-  return TEAM_COLORS_HEX[idx] ?? TEAM_COLORS_HEX[TEAM_COLORS_HEX.length - 1]
-}
-
 // ─── Utilitaire ───────────────────────────────────────────────────────────────
 
 function resolveTeam(teamStr: string | undefined, playerNames: Map<number, string>): string {

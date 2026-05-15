@@ -1036,8 +1036,6 @@ function PlayerMiniCard({
 
 // ─── Step 6 — Composition des poules ─────────────────────────────────────────
 
-const POOL_COLORS = ['#0047FF', '#0a0a0a', '#D97500', '#E60022', '#00C24A', '#4a4a4a', '#6600cc', '#008080']
-
 /** Dispatch vers le mode doubles ou singles selon les catégories sélectionnées */
 function StepPools({ data, players, onChange }: {
   data: WizardData
@@ -1160,7 +1158,6 @@ function StepPoolsSingles({ data, players, onChange }: {
       >
         {assignments.map((poolIds, poolIdx) => {
           const groupLetter = String.fromCharCode(65 + poolIdx)
-          const dotColor = POOL_COLORS[poolIdx] ?? POOL_COLORS[POOL_COLORS.length - 1]
           const tooSmall = poolIds.length < 2
           const isDragTarget = dragOverPool === poolIdx
           const poolPlayers = poolIds
@@ -1374,7 +1371,6 @@ function StepPoolsDoubles({ data, players, onChange, doublesCats }: {
       >
         {assignments.map((poolPairIndices, poolIdx) => {
           const groupLetter = String.fromCharCode(65 + poolIdx)
-          const dotColor = POOL_COLORS[poolIdx] ?? POOL_COLORS[POOL_COLORS.length - 1]
           const tooSmall = poolPairIndices.length < 2
           const isDragTarget = dragOverPool === poolIdx
 

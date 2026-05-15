@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useTournamentsStore } from '@/store/tournamentsStore'
 import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
@@ -86,8 +86,6 @@ function useMatchClock(running: boolean, matchId: number) {
 export function RefereeView() {
   const { id: tournamentIdStr, matchId: matchIdStr } = useParams<{ id: string; matchId: string }>()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const isStandalone = searchParams.get('standalone') === '1'
   const tournamentId = Number(tournamentIdStr)
   const matchId = Number(matchIdStr)
 
