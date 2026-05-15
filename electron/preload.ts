@@ -60,6 +60,9 @@ const dbApi = {
   // Admin / dev
   seedTestPlayers: () => ipcRenderer.invoke('db:seedTestPlayers'),
   clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
+
+  // Fenêtre d'affichage secondaire
+  openNewWindow: (hash: string) => ipcRenderer.invoke('open-new-window', hash),
 }
 
 contextBridge.exposeInMainWorld('db', dbApi)

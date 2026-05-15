@@ -76,10 +76,13 @@ export function generatePoolPlusKnockout(
       tournamentId: config.tournamentId,
       courtCount: courtsForPool,
     }).map((m) => {
-      const adjustedCourt = m.courtNumber != null ? m.courtNumber + courtBase - 1 : undefined
+      // Modulo cyclique : les terrains ne dépassent jamais courtCount
+      const adjustedCourt = m.courtNumber != null
+        ? ((m.courtNumber + courtBase - 2) % config.courtCount) + 1
+        : undefined
       return {
         ...m,
-        courtNumber: adjustedCourt != null && adjustedCourt <= config.courtCount ? adjustedCourt : undefined,
+        courtNumber: adjustedCourt,
         comment: `Groupe ${String.fromCharCode(65 + poolIdx)}`, // A, B, C…
       }
     })

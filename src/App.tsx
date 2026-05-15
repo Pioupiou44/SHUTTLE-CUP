@@ -13,11 +13,15 @@ import { PrintView } from './pages/PrintView'
 
 const DevUI = lazy(() => import('./pages/DevUI').then((m) => ({ default: m.DevUI })))
 
+// Détecte le mode standalone depuis le hash de l'URL (ex : #/path?standalone=1)
+// Doit être évalué AVANT le premier rendu React pour éviter un flash de Topbar
+const isStandalone = window.location.hash.includes('standalone=1')
+
 export function App() {
   return (
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="flex flex-col w-full h-full">
-        <Topbar />
+        {!isStandalone && <Topbar />}
         <main className="flex-1 overflow-y-auto scrollbar-light bg-bg flex flex-col">
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -41,7 +45,7 @@ export function App() {
             />
           </Routes>
         </main>
-        <Ticker />
+        {!isStandalone && <Ticker />}
       </div>
     </HashRouter>
   )

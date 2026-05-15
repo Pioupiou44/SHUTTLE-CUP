@@ -5,6 +5,27 @@ import { registerDbHandlers } from './db/handlers'
 
 const isDev = !app.isPackaged
 
+// Ouvre une nouvelle fenêtre d'affichage (standalone) sur le hash donné
+ipcMain.handle('open-new-window', async (_event, hash: string) => {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+    title: 'ShuttleCup — Affichage',
+  })
+  if (isDev) {
+    await win.loadURL(`http://localhost:5173/#${hash}`)
+  } else {
+    await win.loadFile(path.join(__dirname, '../dist/index.html'), { hash })
+  }
+})
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,

@@ -56,6 +56,9 @@ export interface DbApi {
   // Admin / dev
   seedTestPlayers: () => Promise<void>
   clearAllData: () => Promise<void>
+
+  // Fenêtre d'affichage secondaire
+  openNewWindow: (hash: string) => Promise<void>
 }
 
 // Déclaration globale pour TypeScript — window.db est disponible après preload

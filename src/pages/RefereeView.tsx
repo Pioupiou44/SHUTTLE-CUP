@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTournamentsStore } from '@/store/tournamentsStore'
 import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
@@ -17,7 +17,7 @@ function GiantScore({ value, isServer, textClass }: { value: number; isServer: b
   return (
     <div className="relative inline-block">
       <span className={`font-mono font-black leading-none tracking-[-0.04em] tabular-nums ${textClass}`}
-        style={{ fontSize: '120px' }}>
+        style={{ fontSize: 'min(calc((100vw - 256px) * 0.18), 28vh)' }}>
         {String(value).padStart(2, '0')}
       </span>
       {isServer && (
@@ -86,12 +86,14 @@ function useMatchClock(running: boolean, matchId: number) {
 export function RefereeView() {
   const { id: tournamentIdStr, matchId: matchIdStr } = useParams<{ id: string; matchId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isStandalone = searchParams.get('standalone') === '1'
   const tournamentId = Number(tournamentIdStr)
   const matchId = Number(matchIdStr)
 
-  const { tournaments } = useTournamentsStore()
-  const { players } = usePlayersStore()
-  const { rules } = useRulesStore()
+  const { tournaments, fetchTournaments } = useTournamentsStore()
+  const { players, fetchPlayers } = usePlayersStore()
+  const { rules, fetchRules } = useRulesStore()
 
   const historyKey = `shuttle-history-${matchId}`
 
@@ -128,6 +130,13 @@ export function RefereeView() {
   const rule = rules.find((r) => r.id === tournament?.scoringRuleId)
 
   const clock = useMatchClock(!paused && !matchDone, matchId)
+
+  // Peuple les stores si la fenêtre est ouverte de façon autonome (nouvelle fenêtre Electron)
+  useEffect(() => {
+    void fetchPlayers()
+    void fetchTournaments()
+    void fetchRules()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persiste l'historique du ruban dans localStorage
   useEffect(() => {
@@ -341,7 +350,7 @@ export function RefereeView() {
             className="px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors
               text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-white border border-white/20"
           >
-            PLAN ↗
+            PLANNING ↗
           </button>
         </div>
       </div>
@@ -358,22 +367,21 @@ export function RefereeView() {
           <div className="p-5 pt-6">
             <div className="inline-block bg-white/20 px-2 py-0.5 mb-2">
               <span className="text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-white">
-                TEAM A
+                ÉQUIPE A
               </span>
             </div>
             {teamA.split(' / ').map((name, i) => (
               <div key={i}
                 className="font-black uppercase tracking-[-0.02em] leading-[0.95] text-white"
-                style={{ fontSize: teamA.includes(' / ') ? '28px' : '36px' }}>
+                style={{ fontSize: teamA.includes(' / ') ? 'clamp(20px, calc((100vw - 256px) * 0.038), 52px)' : 'clamp(24px, calc((100vw - 256px) * 0.05), 68px)' }}>
                 {name}
               </div>
             ))}
           </div>
 
-          {/* Score centré */}
-          <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          {/* Score — ferré à gauche */}
+          <div className="flex-1 flex flex-col items-start justify-center gap-4 pl-6">
             <GiantScore value={currentSet.a} isServer={server === 'a'} textClass="text-white" />
-            {/* Badges sets précédents */}
             {sets.length > 1 && (
               <div className="flex gap-1.5">
                 {sets.slice(0, -1).map((s, i) => (
@@ -392,17 +400,17 @@ export function RefereeView() {
 
           {/* Bouton +1 point */}
           <button
-            className="w-full py-4 bg-white text-[#0047FF] font-black text-[16px]
-              uppercase tracking-[0.05em] hover:bg-white/90 active:bg-white/80 transition-colors
-              border-t-2 border-white/30 min-h-[56px]"
-            onClick={(e) => { e.stopPropagation(); addPoint('a') }}
-          >
-            [A] + 1 POINT
-          </button>
+              className="w-full py-5 bg-white text-[#0047FF] font-black text-[18px]
+                uppercase tracking-[0.05em] hover:bg-white/90 active:bg-white/80 transition-colors
+                border-t-2 border-white/30 min-h-[64px]"
+              onClick={(e) => { e.stopPropagation(); addPoint('a') }}
+            >
+              [A] + 1 POINT
+            </button>
         </div>
 
         {/* Centre — contrôles */}
-        <div className="w-48 flex flex-col bg-bg border-x-2 border-line shrink-0">
+        <div className="w-64 flex flex-col bg-bg border-x-2 border-line shrink-0">
 
           {/* En-tête set courant */}
           <div className="px-4 pt-4 pb-3 border-b border-line-soft text-center">
@@ -436,37 +444,40 @@ export function RefereeView() {
             </div>
           </div>
 
-          {/* Boutons actions */}
+          {/* Boutons actions — hiérarchie ergonomique */}
           <div className="px-3 py-3 flex flex-col gap-2">
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                disabled={history.length === 0}
-                onClick={undo}
-                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
-                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
-                  disabled:cursor-not-allowed transition-colors"
-              >↩ UNDO</button>
-              <button
-                onClick={() => setPaused((p) => !p)}
-                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
-                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong transition-colors"
-              >{paused ? '▶ REPRISE' : '⏸ PAUSE'}</button>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
+            {/* ANNULER — pleine largeur */}
+            <button
+              disabled={history.length === 0}
+              onClick={undo}
+              className="w-full py-3 border-2 border-ink-3 text-ink text-[13px] font-mono font-black
+                uppercase tracking-[0.06em] bg-bg hover:bg-bg-strong disabled:opacity-30
+                disabled:cursor-not-allowed transition-colors"
+            >↩ ANNULER</button>
+            {/* PAUSE / REPRISE — pleine largeur */}
+            <button
+              onClick={() => setPaused((p) => !p)}
+              className={`w-full py-3 border-2 text-[13px] font-mono font-black uppercase tracking-[0.06em] transition-colors
+                ${paused
+                  ? 'border-green bg-green text-ink'
+                  : 'border-line text-ink bg-bg hover:bg-bg-strong'}`}
+            >{paused ? '▶ REPRISE' : '⏸ PAUSE'}</button>
+            {/* FORFAITS — 2 colonnes */}
+            <div className="grid grid-cols-2 gap-1.5 mt-1">
               <button
                 disabled={matchDone}
                 onClick={() => handleWalkover('a')}
-                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
-                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
+                className="py-3 border-2 border-ink-3 text-[13px] font-mono font-black uppercase
+                  tracking-[0.06em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
                   disabled:cursor-not-allowed transition-colors"
-              >WO A</button>
+              >FORFAIT A</button>
               <button
                 disabled={matchDone}
                 onClick={() => handleWalkover('b')}
-                className="py-2 border border-line text-[10px] font-mono font-bold uppercase
-                  tracking-[0.08em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
+                className="py-3 border-2 border-ink-3 text-[13px] font-mono font-black uppercase
+                  tracking-[0.06em] text-ink bg-bg hover:bg-bg-strong disabled:opacity-30
                   disabled:cursor-not-allowed transition-colors"
-              >WO B</button>
+              >FORFAIT B</button>
             </div>
           </div>
 
@@ -483,18 +494,6 @@ export function RefereeView() {
               </div>
             </div>
           )}
-
-          {/* Valider le set */}
-          {currentSetDone && !matchDone && (
-            <button
-              onClick={validateSet}
-              className="w-full py-4 bg-ink text-green-fluo font-black text-[11px]
-                uppercase tracking-[0.05em] hover:brightness-110 transition-colors
-                border-t-2 border-line min-h-[56px]"
-            >
-              VALIDER LE SET →
-            </button>
-          )}
         </div>
 
         {/* Équipe B — fond vert-fluo */}
@@ -506,20 +505,20 @@ export function RefereeView() {
           <div className="p-5 pt-6 flex flex-col items-end text-right">
             <div className="inline-block bg-black/15 px-2 py-0.5 mb-2">
               <span className="text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-ink">
-                TEAM B
+                ÉQUIPE B
               </span>
             </div>
             {teamB.split(' / ').map((name, i) => (
               <div key={i}
                 className="font-black uppercase tracking-[-0.02em] leading-[0.95] text-ink"
-                style={{ fontSize: teamB.includes(' / ') ? '28px' : '36px' }}>
+                style={{ fontSize: teamB.includes(' / ') ? 'clamp(20px, calc((100vw - 256px) * 0.038), 52px)' : 'clamp(24px, calc((100vw - 256px) * 0.05), 68px)' }}>
                 {name}
               </div>
             ))}
           </div>
 
-          {/* Score centré */}
-          <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          {/* Score — ferré à droite */}
+          <div className="flex-1 flex flex-col items-end justify-center gap-4 pr-6">
             <GiantScore value={currentSet.b} isServer={server === 'b'} textClass="text-ink" />
             {/* Badges sets précédents */}
             {sets.length > 1 && (
@@ -540,20 +539,32 @@ export function RefereeView() {
 
           {/* Bouton +1 point */}
           <button
-            className="w-full py-4 bg-ink text-green-fluo font-black text-[16px]
-              uppercase tracking-[0.05em] hover:brightness-110 active:brightness-90 transition-colors
-              border-t-2 border-ink/30 min-h-[56px]"
-            onClick={(e) => { e.stopPropagation(); addPoint('b') }}
-          >
-            + 1 POINT [B]
-          </button>
+              className="w-full py-5 bg-ink text-green-fluo font-black text-[18px]
+                uppercase tracking-[0.05em] hover:brightness-110 active:brightness-90 transition-colors
+                border-t-2 border-ink/30 min-h-[64px]"
+              onClick={(e) => { e.stopPropagation(); addPoint('b') }}
+            >
+              + 1 POINT [B]
+            </button>
         </div>
       </div>
 
+      {/* ── Valider le set — barre pleine largeur ───────────────────────── */}
+      {currentSetDone && !matchDone && (
+        <button
+          onClick={validateSet}
+          className="w-full py-5 bg-ink text-green-fluo font-black text-[16px]
+            uppercase tracking-[0.05em] hover:brightness-110 transition-colors
+            border-t-2 border-line shrink-0 min-h-[64px]"
+        >
+          VALIDER LE SET →
+        </button>
+      )}
+
       {/* ── Ruban point-par-point ────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 py-1.5 bg-bg-strong border-t-2 border-line shrink-0 overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3 min-h-[48px] bg-bg-strong border-t-2 border-line shrink-0 overflow-hidden">
         <span className="text-[10px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 shrink-0">
-          POINT-BY-POINT → SET {currentSetIndex + 1}
+          POINT PAR POINT · SET {currentSetIndex + 1}
         </span>
         <div className="flex gap-1 overflow-x-auto scrollbar-none flex-1">
           {currentSetHistory.map((h, i) => (
@@ -572,7 +583,7 @@ export function RefereeView() {
         </div>
       </div>
 
-      {/* ── Footer raccourcis clavier ────────────────────────────────────── */}
+      {/* ── Footer raccourcis clavier ──────────────────────────────────── */}
       <div className="flex items-center justify-center gap-5 px-6 py-2 bg-bg-alt border-t border-line-soft shrink-0">
         {[
           { key: 'A / ←', action: '+1 Équipe A' },

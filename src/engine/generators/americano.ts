@@ -24,39 +24,47 @@ export function generateAmericano(
 ): Omit<Match, 'id' | 'winnerId' | 'comment'>[] {
   if (playerIds.length < 4) return []
 
-  // Complète à un multiple de 4 avec byes
-  const players = [...playerIds]
-  while (players.length % 4 !== 0) players.push(-1)
-  const n = players.length
+  // Nombre de joueurs actifs par ronde = plus grand multiple de 4 ≤ playerIds.length
+  const activePlayers = Math.floor(playerIds.length / 4) * 4
+  const benchCount = playerIds.length - activePlayers // joueurs au banc à chaque ronde
 
-  const targetRounds = config.rounds ?? Math.max(3, n - 1)
+  // Nombre de rondes basé sur le vrai count, pas le count paddé
+  const targetRounds = config.rounds ?? Math.max(3, playerIds.length - 1)
   const matches: Omit<Match, 'id' | 'winnerId' | 'comment'>[] = []
 
   // Table des partenariats déjà joués pour minimiser les répétitions
   const partnerships = new Set<string>()
 
+  // Rotation équitable du banc : chaque joueur attend à tour de rôle
+  const benchRotation = [...playerIds]
+
   for (let round = 1; round <= targetRounds; round++) {
-    const shuffled = shuffleWithConstraints([...players], partnerships)
+    // Sélectionne les joueurs au banc pour cette ronde (rotation circulaire)
+    const benchStart = ((round - 1) * benchCount) % playerIds.length
+    const benchSet = new Set<number>()
+    for (let b = 0; b < benchCount; b++) {
+      benchSet.add(benchRotation[(benchStart + b) % benchRotation.length])
+    }
+    const playing = playerIds.filter((p) => !benchSet.has(p))
+
+    const shuffled = shuffleWithConstraints([...playing], partnerships)
     let court = 1
 
-    for (let i = 0; i < shuffled.length; i += 4) {
+    for (let i = 0; i + 3 < shuffled.length; i += 4) {
       const [a1, a2, b1, b2] = shuffled.slice(i, i + 4)
-      const hasBye = [a1, a2, b1, b2].some((x) => x === -1)
 
-      if (!hasBye) {
-        // Enregistre les partenariats de cette ronde
-        partnerships.add(pairKey(a1, a2))
-        partnerships.add(pairKey(b1, b2))
+      // Enregistre les partenariats de cette ronde
+      partnerships.add(pairKey(a1, a2))
+      partnerships.add(pairKey(b1, b2))
 
-        matches.push({
-          tournamentId: config.tournamentId,
-          round,
-          courtNumber: court <= config.courtCount ? court : undefined,
-          status: 'pending',
-          teamA: `${a1},${a2}`,
-          teamB: `${b1},${b2}`,
-        })
-      }
+      matches.push({
+        tournamentId: config.tournamentId,
+        round,
+        courtNumber: court <= config.courtCount ? court : undefined,
+        status: 'pending',
+        teamA: `${a1},${a2}`,
+        teamB: `${b1},${b2}`,
+      })
       court++
     }
   }

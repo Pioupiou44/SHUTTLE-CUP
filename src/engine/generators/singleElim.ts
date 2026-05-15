@@ -70,30 +70,22 @@ export function nextPowerOf2(n: number): number {
 }
 
 /**
- * Place les joueurs dans le bracket avec byes aux bonnes positions.
- * Algorithme classique : [1, bye, 4, 5, 3, 6, 2, bye] pour 6 joueurs.
+ * Place les joueurs dans le bracket seeded standard.
+ * Algorithme de doublement : [1,2] → [1,4,2,3] → [1,8,4,5,2,7,3,6] …
+ * Chaque seed s est complété par (taille+1-s) à chaque étape.
+ * Garantit : seed1 vs seed(n), seed2 vs seed(n-1), etc. en R1.
  */
 function seededBracket(playerIds: number[], size: number): (number | null)[] {
-  const bracket: (number | null)[] = new Array(size).fill(null)
-
-  // Place les joueurs par seed dans les positions de bracket standard
-  const positions = getSeededPositions(size)
-  for (let i = 0; i < playerIds.length; i++) {
-    bracket[positions[i]] = playerIds[i]
+  // Construction de la liste des seeds dans l'ordre du bracket
+  let seeds = [1, 2]
+  let currentSize = 2
+  while (currentSize < size) {
+    currentSize *= 2
+    seeds = seeds.flatMap((s) => [s, currentSize + 1 - s])
   }
-  return bracket
-}
 
-/**
- * Retourne l'ordre des positions pour un bracket seeded de taille `size`.
- */
-function getSeededPositions(size: number): number[] {
-  if (size === 1) return [0]
-  const half = getSeededPositions(size / 2)
-  const result: number[] = []
-  for (let i = 0; i < half.length; i++) {
-    result.push(half[i] * 2)
-    result.push(size - 1 - half[i] * 2)
-  }
-  return result
+  return seeds.map((seedNum) => {
+    const idx = seedNum - 1 // seed 1-indexé → indice 0-indexé
+    return idx < playerIds.length ? playerIds[idx] : null
+  })
 }
