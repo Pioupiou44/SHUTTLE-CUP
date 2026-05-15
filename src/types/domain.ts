@@ -121,7 +121,7 @@ export const FORMAT_LABELS: Record<TournamentFormat, string> = {
   'round-robin': 'Tout le monde joue contre tout le monde — classement final par points. Pas de finale.',
   'knockout': 'Tableau à élimination directe — le perdant est éliminé à chaque tour.',
   'double-elimination': 'Deux défaites pour être éliminé — tableau principal + repêchage.',
-  'pool+knockout': '⭐ Phase de poules puis tableau final généré automatiquement selon le classement. Recommandé pour les tournois de club.',
+  'pool+knockout': 'Phase de poules puis tableau final généré automatiquement selon le classement. Recommandé pour les tournois de club.',
   'americano': 'Partenaires et adversaires changent à chaque ronde selon les scores — adapté en doubles.',
   'swiss': 'Rondes générées en fonction des résultats, pas d\'élimination (bientôt disponible)',
   'king-of-court': 'Les vainqueurs restent sur le terrain, les perdants tournent (bientôt disponible)',

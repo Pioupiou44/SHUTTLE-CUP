@@ -59,20 +59,36 @@ export function generatePoolPlusKnockout(
     ? config.manualPools
     : splitIntoPools(playerIds, poolCount)
 
+  // Limite les qualifiants par poule à la taille de la plus petite poule moins 1
+  // (on ne peut qualifier davantage que les participants d'une poule)
+  const minPoolSize = pools.length > 0 ? Math.min(...pools.map((p) => p.length)) : 2
+  const effectiveQualifiers = Math.min(qualifiers, Math.max(1, minPoolSize - 1))
+
   // Phase 1 : Round Robin par groupe
-  // Chaque match obtient un commentaire "Groupe X" pour distinguer les poules
-  const poolMatches = pools.flatMap((poolPlayers, poolIdx) =>
-    generateRoundRobin(poolPlayers, {
+  // Chaque poule reçoit un décalage de terrain pour éviter que toutes les poules
+  // commencent au terrain 1. La poule i commence au terrain (somme des terrains des poules précédentes + 1).
+  const poolMatches: Omit<Match, 'id' | 'winnerId'>[] = []
+  let courtBase = 1
+  for (let poolIdx = 0; poolIdx < pools.length; poolIdx++) {
+    const poolPlayers = pools[poolIdx]
+    const courtsForPool = Math.max(1, Math.floor(poolPlayers.length / 2))
+    const rrMatches = generateRoundRobin(poolPlayers, {
       tournamentId: config.tournamentId,
-      courtCount: config.courtCount,
-    }).map((m) => ({
-      ...m,
-      comment: `Groupe ${String.fromCharCode(65 + poolIdx)}`, // A, B, C…
-    }))
-  )
+      courtCount: courtsForPool,
+    }).map((m) => {
+      const adjustedCourt = m.courtNumber != null ? m.courtNumber + courtBase - 1 : undefined
+      return {
+        ...m,
+        courtNumber: adjustedCourt != null && adjustedCourt <= config.courtCount ? adjustedCourt : undefined,
+        comment: `Groupe ${String.fromCharCode(65 + poolIdx)}`, // A, B, C…
+      }
+    })
+    poolMatches.push(...rrMatches)
+    courtBase += courtsForPool
+  }
 
   // Phase 2 : Bracket knockout (qualifiés × poolCount joueurs)
-  const knockoutSize = nextPowerOf2(qualifiers * poolCount)
+  const knockoutSize = nextPowerOf2(effectiveQualifiers * poolCount)
   const knockoutRoundsCount = Math.log2(knockoutSize)
   const knockoutMatches: Omit<Match, 'id' | 'winnerId'>[] = []
 

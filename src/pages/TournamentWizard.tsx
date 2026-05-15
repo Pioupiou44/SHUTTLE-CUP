@@ -85,7 +85,7 @@ const FORMAT_STEPS: Partial<Record<TournamentFormat, string[]>> = {
 }
 
 const FORMAT_OPTIONS: { value: TournamentFormat; label: string; disabled?: boolean }[] = [
-  { value: 'pool+knockout',      label: '⭐ Poules + Finale (recommandé)' },
+  { value: 'pool+knockout',      label: 'Poules + Finale (recommandé)' },
   { value: 'round-robin',        label: 'Poules uniquement — Round Robin' },
   { value: 'knockout',           label: 'Élimination directe' },
   { value: 'double-elimination', label: 'Double élimination' },
@@ -828,24 +828,6 @@ function Step3({ data, onChange }: { data: WizardData; onChange: (d: Partial<Wiz
         ))}
       </div>
 
-      {/* Nombre de groupes (pool+knockout uniquement et hors mode équipes) */}
-      {data.format === 'pool+knockout' && !data.teamMode && (
-        <div>
-          <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
-            Nombre de groupes
-          </p>
-          <div className="flex gap-2">
-            {[2, 3, 4, 6, 8].map((n) => (
-              <button key={n} onClick={() => onChange({ poolCount: n })}
-                className={`px-4 py-2 min-h-[44px] font-mono font-bold text-[14px] border-2 transition-colors
-                  ${data.poolCount === n ? 'bg-ink text-green-fluo border-ink' : 'bg-bg text-ink border-line hover:bg-bg-strong'}`}>
-                {n}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Disciplines */}
       <div>
         <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
@@ -1063,10 +1045,31 @@ function StepPools({ data, players, onChange }: {
   onChange: (d: Partial<WizardData>) => void
 }) {
   const doublesCats = data.categories.filter((c) => DOUBLES_CATS.includes(c))
-  if (doublesCats.length > 0) {
-    return <StepPoolsDoubles data={data} players={players} onChange={onChange} doublesCats={doublesCats} />
-  }
-  return <StepPoolsSingles data={data} players={players} onChange={onChange} />
+  return (
+    <div className="flex flex-col gap-8">
+      {/* Nombre de groupes */}
+      <div>
+        <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
+          Nombre de poules
+        </p>
+        <div className="flex gap-2">
+          {[2, 3, 4, 6, 8].map((n) => (
+            <button key={n} onClick={() => onChange({ poolCount: n })}
+              className={`px-4 py-2 min-h-[44px] font-mono font-bold text-[14px] border-2 transition-colors
+                ${data.poolCount === n ? 'bg-ink text-green-fluo border-ink' : 'bg-bg text-ink border-line hover:bg-bg-strong'}`}>
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Composition des poules */}
+      {doublesCats.length > 0
+        ? <StepPoolsDoubles data={data} players={players} onChange={onChange} doublesCats={doublesCats} />
+        : <StepPoolsSingles data={data} players={players} onChange={onChange} />
+      }
+    </div>
+  )
 }
 
 // ─── Mode singles — joueurs individuels ──────────────────────────────────────
@@ -1181,15 +1184,12 @@ function StepPoolsSingles({ data, players, onChange }: {
               }}
               onDrop={() => handleDrop(poolIdx)}
             >
-              {/* Header coloré */}
-              <div
-                className="px-3 py-2 flex items-center justify-between"
-                style={{ backgroundColor: dotColor }}
-              >
-                <span className="font-mono font-bold text-[11px] uppercase tracking-[0.08em] text-white">
+              {/* En-tête neutre */}
+              <div className="px-3 py-2 flex items-center justify-between bg-bg-strong border-b-2 border-line">
+                <span className="font-mono font-bold text-[11px] uppercase tracking-[0.08em] text-ink">
                   Groupe {groupLetter}
                 </span>
-                <span className="font-mono text-[11px] text-white/70">
+                <span className="font-mono text-[11px] text-ink-3">
                   {poolIds.length} joueur{poolIds.length > 1 ? 's' : ''}
                 </span>
               </div>
@@ -1211,6 +1211,14 @@ function StepPoolsSingles({ data, players, onChange }: {
                     >
                       {/* Poignée de drag */}
                       <span className="text-ink-3 flex-shrink-0" style={{ fontSize: 10, lineHeight: 1 }}>⠿</span>
+                      {/* Carré couleur équipe */}
+                      {(() => {
+                        const letter = data.teamAssignments[player.id]
+                        if (!letter) return null
+                        const idx = letter.charCodeAt(0) - 65
+                        const color = TEAM_COLORS[idx] ?? TEAM_COLORS[TEAM_COLORS.length - 1]
+                        return <span className="w-3 h-3 shrink-0" style={{ backgroundColor: color.bg }} />
+                      })()}
                       <span className="flex-1 font-sans text-[13px] text-ink truncate min-w-0">
                         {playerDisplayName(player)}
                       </span>
@@ -1386,15 +1394,12 @@ function StepPoolsDoubles({ data, players, onChange, doublesCats }: {
               }}
               onDrop={() => handleDrop(poolIdx)}
             >
-              {/* Header coloré */}
-              <div
-                className="px-3 py-2 flex items-center justify-between"
-                style={{ backgroundColor: dotColor }}
-              >
-                <span className="font-mono font-bold text-[11px] uppercase tracking-[0.08em] text-white">
+              {/* En-tête neutre */}
+              <div className="px-3 py-2 flex items-center justify-between bg-bg-strong border-b-2 border-line">
+                <span className="font-mono font-bold text-[11px] uppercase tracking-[0.08em] text-ink">
                   Groupe {groupLetter}
                 </span>
-                <span className="font-mono text-[11px] text-white/70">
+                <span className="font-mono text-[11px] text-ink-3">
                   {poolPairIndices.length} paire{poolPairIndices.length > 1 ? 's' : ''}
                 </span>
               </div>
@@ -1421,12 +1426,19 @@ function StepPoolsDoubles({ data, players, onChange, doublesCats }: {
                     >
                       <span className="text-ink-3 flex-shrink-0 mt-0.5" style={{ fontSize: 10, lineHeight: 1 }}>⠿</span>
                       <div className="flex-1 min-w-0">
-                        <p className="font-sans text-[12px] font-bold text-ink truncate">
-                          {pA ? playerDisplayName(pA) : `#${aId}`}
-                        </p>
-                        <p className="font-sans text-[11px] text-ink-2 truncate">
-                          {pB ? playerDisplayName(pB) : `#${bId}`}
-                        </p>
+                        {[{ id: aId, player: pA }, { id: bId, player: pB }].map(({ id, player: p }) => {
+                          const letter = p ? data.teamAssignments[p.id] : undefined
+                          const idx = letter ? letter.charCodeAt(0) - 65 : -1
+                          const color = idx >= 0 ? (TEAM_COLORS[idx] ?? TEAM_COLORS[TEAM_COLORS.length - 1]) : null
+                          return (
+                            <div key={id} className="flex items-center gap-1.5">
+                              {color && <span className="w-2.5 h-2.5 shrink-0" style={{ backgroundColor: color.bg }} />}
+                              <p className="font-sans text-[12px] text-ink truncate">
+                                {p ? playerDisplayName(p) : `#${id}`}
+                              </p>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
                   )
@@ -1804,7 +1816,7 @@ export function TournamentWizard() {
   // Step 6 (Poules) uniquement en mode pool+knockout hors mode équipes
   // Step 7 (Composition) visible uniquement si des catégories doubles sont sélectionnées
   const hasDoublesCats = data.categories.some((c) => DOUBLES_CATS.includes(c))
-  const hasPoolFormat = data.format === 'pool+knockout' && !data.teamMode
+  const hasPoolFormat = data.format === 'pool+knockout'
   const STEPS = BASE_STEPS.filter((s) => {
     if (s.id === 6) return hasPoolFormat
     if (s.id === 7) return hasDoublesCats
@@ -1857,13 +1869,14 @@ export function TournamentWizard() {
         date: data.date,
         location: data.location || undefined,
         courtCount: data.courtCount,
-        // En mode équipes, le nombre de groupes = nombre d'équipes
-        poolCount: data.teamMode ? data.teamNames.length : data.poolCount,
+        poolCount: data.poolCount,
         format: data.format,
         status: 'draft',
         scoringRuleId: data.scoringRuleId ?? undefined,
         categories: data.categories,
-        teamMode: data.teamMode ? 1 : 0,
+        // Les équipes du Step ÉQUIPE sont des labels d'identification uniquement —
+        // teamMode reste 0 pour ne pas déclencher la génération interclub.
+        teamMode: 0,
         teamAName: data.teamMode ? (data.teamNames[0] ?? undefined) : undefined,
         teamBName: data.teamMode ? (data.teamNames[1] ?? undefined) : undefined,
         teamNames: data.teamMode ? data.teamNames : undefined,

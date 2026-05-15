@@ -87,7 +87,7 @@ export function Topbar() {
           title="Soutenir ShuttleCup"
         >
           <span>♥</span>
-          <span>Don</span>
+          <span>Soutenir</span>
         </a>
         <div className="flex items-center px-4 border-l-2 border-line h-full gap-3">
           <span className="font-mono font-bold text-[12px] text-ink-2 tracking-[0.05em]">

@@ -829,6 +829,9 @@ function PlanningTab({
   onSwapSelect,
   onSwapPositions,
   playerTeamMap,
+  readOnly = false,
+  onCourtChange,
+  courtCount,
 }: {
   matches: Match[]
   tournamentId: number
@@ -844,6 +847,9 @@ function PlanningTab({
   onSwapSelect?: (matchId: number, side: 'A' | 'B') => void
   onSwapPositions?: (matchId1: number, matchId2: number) => void
   playerTeamMap?: Map<number, string>
+  readOnly?: boolean
+  onCourtChange?: (matchId: number, courtNumber: number | null) => void
+  courtCount?: number
 }) {
   const [filterCat, setFilterCat] = useState<MatchCategory | 'all'>('all')
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null)
@@ -861,6 +867,9 @@ function PlanningTab({
     const knockoutEmpty = ko101.length > 0 && ko101.every((m) => !m.teamA && !m.teamB)
     return poolsDone && knockoutEmpty
   }, [matches, tournamentFormat])
+
+  // Ref vers handleSeedKnockout pour l'auto-seed (toujours la version la plus récente)
+  const handleSeedKnockoutRef = useRef<() => Promise<void>>(async () => {})
 
   // Calcule les classements par groupe et insère les participants dans le knockout
   const handleSeedKnockout = async () => {
@@ -942,10 +951,12 @@ function PlanningTab({
             seeds.push({ matchId: ko1[1].id, side: 'B', playerIds: parseIds((rA[1] ?? rA[0]).team), tournamentId })
           }
         } else {
-          // N groupes : qualifiants listés par niveau (tous 1ers, puis tous 2es…) avec inversion pour éviter rematches
+          // N groupes : 1ers de chaque groupe + repêchage des meilleurs non-qualifiants
+          const slotsNeeded = ko1.length * 2
           const qualifiers: string[] = []
-          const perGroup = Math.ceil(ko1.length * 2 / allGroupNames.length)
-          for (let rank = 0; rank < perGroup; rank++) {
+          const maxRankNeeded = Math.ceil(slotsNeeded / allGroupNames.length)
+
+          for (let rank = 0; rank < maxRankNeeded; rank++) {
             // Inverser l'ordre des groupes pour les runners-up = cross-seeding anti-rematch
             const orderedGroups = rank % 2 === 0 ? [...allGroupNames] : [...allGroupNames].reverse()
             for (const groupName of orderedGroups) {
@@ -953,6 +964,21 @@ function PlanningTab({
               if (ranked[rank]) qualifiers.push(ranked[rank].team)
             }
           }
+
+          // Repêchage : si le bracket n'est pas plein, prendre les meilleurs non-qualifiants
+          if (qualifiers.length < slotsNeeded) {
+            const alreadyQualified = new Set(qualifiers)
+            const runners: { team: string; wins: number; pts: number }[] = []
+            for (const groupName of allGroupNames) {
+              for (const r of groupRankings.get(groupName) ?? []) {
+                if (!alreadyQualified.has(r.team)) runners.push(r)
+              }
+            }
+            runners.sort((a, b) => b.wins - a.wins || b.pts - a.pts)
+            const needed = slotsNeeded - qualifiers.length
+            qualifiers.push(...runners.slice(0, needed).map((r) => r.team))
+          }
+
           // Distribue dans les slots KO1 : A et B alternés
           for (let i = 0; i < ko1.length && i * 2 + 1 < qualifiers.length; i++) {
             seeds.push({ matchId: ko1[i].id, side: 'A', playerIds: parseIds(qualifiers[i * 2]), tournamentId })
@@ -963,12 +989,38 @@ function PlanningTab({
 
       if (seeds.length > 0) {
         await window.db.seedKnockoutMatches(seeds)
+        // Auto-avance les qualifiants qui font face à un BYE (slot vide de l'autre côté)
+        const freshMatches = await window.db.getMatches(tournamentId)
+        for (const m of freshMatches.filter((m2) => m2.round === 101)) {
+          if (m.teamA && !m.teamB) {
+            const winnerId = parseInt(m.teamA.split(',')[0], 10)
+            if (!isNaN(winnerId)) {
+              await window.db.updateMatchStatus(m.id, 'walkover')
+              await window.db.advanceWinner(tournamentId, m.id, winnerId)
+            }
+          } else if (!m.teamA && m.teamB) {
+            const winnerId = parseInt(m.teamB.split(',')[0], 10)
+            if (!isNaN(winnerId)) {
+              await window.db.updateMatchStatus(m.id, 'walkover')
+              await window.db.advanceWinner(tournamentId, m.id, winnerId)
+            }
+          }
+        }
         onRefresh()
       }
     } finally {
       setSeeding(false)
     }
   }
+
+  // Mise à jour de la ref + auto-déclenchement dès que toutes les poules sont terminées
+  handleSeedKnockoutRef.current = handleSeedKnockout
+  useEffect(() => {
+    if (canSeedKnockout) {
+      void handleSeedKnockoutRef.current()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSeedKnockout])
 
   // Formate les scores d'un match en "21-15  21-17"
   const formatScores = useCallback((matchId: number): string => {
@@ -1060,17 +1112,36 @@ function PlanningTab({
                 const isSelectedA = swapSlot?.matchId === m.id && swapSlot?.side === 'A'
                 const isSelectedB = swapSlot?.matchId === m.id && swapSlot?.side === 'B'
 
-                const teamCell = (side: 'A' | 'B', label: string, isWin: boolean, isSelected: boolean) => {
+                const teamCell = (side: 'A' | 'B', isWin: boolean, isSelected: boolean) => {
                   const rawTeam = side === 'A' ? m.teamA : m.teamB
-                  const dotColor = playerTeamMap ? getTeamColor(rawTeam, playerTeamMap) : null
-                  const dot = dotColor
-                    ? <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
-                    : null
+                  const ids = rawTeam && rawTeam !== 'BYE'
+                    ? rawTeam.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
+                    : []
+
+                  // Un dot + nom par joueur (singles = 1, doubles = 2)
+                  const chips = ids.map((id) => {
+                    const name = allPlayerNames.get(id) ?? `Joueur ${id}`
+                    const teamSide = playerTeamMap?.get(id)
+                    const color = teamSide
+                      ? (TEAM_COLORS_HEX[teamSide.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0)] ?? null)
+                      : null
+                    return { name, color }
+                  })
+
+                  const innerContent = chips.length > 0
+                    ? chips.map((p, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 shrink-0">
+                          {i > 0 && <span className="text-ink-3 mx-0.5 font-normal">/</span>}
+                          {p.color && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: p.color }} />}
+                          <span>{p.name}</span>
+                        </span>
+                      ))
+                    : [<span key="fb" className="text-ink-3">{rawTeam === 'BYE' ? 'BYE' : '?'}</span>]
 
                   if (swapMode && onSwapSelect) {
                     return (
                       <button
-                        className={`font-sans font-bold text-[14px] text-left px-1 border-2 transition-colors flex items-center gap-2
+                        className={`font-sans font-bold text-[14px] text-left px-1 border-2 transition-colors flex items-center gap-1 flex-wrap
                           ${isSelected
                             ? 'border-blue bg-blue text-white'
                             : swapSlot
@@ -1078,15 +1149,13 @@ function PlanningTab({
                               : 'border-dashed border-line-soft text-ink hover:border-blue hover:bg-blue/5 cursor-pointer'}`}
                         onClick={(e) => { e.stopPropagation(); onSwapSelect(m.id, side) }}
                       >
-                        {dot}
-                        {label}
+                        {innerContent}
                       </button>
                     )
                   }
                   return (
-                    <span className={`font-sans font-bold text-[14px] flex items-center gap-2 ${isWin ? 'text-green' : isDone ? 'text-ink-3' : 'text-ink'}`}>
-                      {dot}
-                      {label}
+                    <span className={`font-sans font-bold text-[14px] flex items-center gap-1 flex-wrap ${isWin ? 'text-green' : isDone ? 'text-ink-3' : 'text-ink'}`}>
+                      {innerContent}
                     </span>
                   )
                 }
@@ -1110,26 +1179,42 @@ function PlanningTab({
                       ${isSelectedA || isSelectedB ? 'ring-2 ring-inset ring-blue' : ''}
                       ${dragOverId === m.id && dragMatchId !== m.id ? 'ring-2 ring-inset ring-green' : ''}
                       ${dragMatchId === m.id ? 'opacity-50' : ''}`}
-                    onClick={() => { if (!swapMode) setSelectedMatch(m) }}
+                    onClick={() => { if (!swapMode && !readOnly) setSelectedMatch(m) }}
                   >
-                    {teamCell('A', resolveTeam(m.teamA, allPlayerNames), isWinA, isSelectedA)}
-                    {teamCell('B', resolveTeam(m.teamB, allPlayerNames), isWinB, isSelectedB)}
+                    {teamCell('A', isWinA, isSelectedA)}
+                    {teamCell('B', isWinB, isSelectedB)}
                     {/* Score compact */}
                     <span className={`font-mono font-bold text-[13px] tracking-[0.04em]
                       ${isDone ? 'text-ink' : 'text-ink-3'}`}>
                       {isDone && scoreStr ? scoreStr : m.status === 'walkover' ? 'Forfait' : '—'}
                     </span>
-                    <span className="text-[11px] font-mono text-ink-3">
-                      {m.courtNumber != null ? `T${m.courtNumber}` : '—'}
-                    </span>
+                    {swapMode && onCourtChange ? (
+                      <input
+                        type="number"
+                        min={1}
+                        max={courtCount ?? 99}
+                        defaultValue={m.courtNumber ?? ''}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = parseInt(e.target.value, 10)
+                          onCourtChange(m.id, isNaN(v) || v < 1 ? null : v)
+                        }}
+                        className="w-10 border border-line text-center text-[11px] font-mono bg-bg text-ink py-0.5 outline-none focus:border-blue"
+                        style={{ borderRadius: 0 }}
+                      />
+                    ) : (
+                      <span className="text-[11px] font-mono text-ink-3">
+                        {m.courtNumber != null ? `T${m.courtNumber}` : '—'}
+                      </span>
+                    )}
                     {hasCats && (
                       <span className="text-[11px] font-mono font-bold text-ink">
                         {m.category ?? '—'}
                       </span>
                     )}
-                    {/* Statut + boutons d'action (masqués en mode réorganisation) */}
+                    {/* Statut + boutons d'action (masqués en mode réorganisation et en draft) */}
                     <div className="flex items-center gap-2">
-                      {!swapMode && (
+                      {!swapMode && !readOnly && (
                         <>
                           <Badge variant={MATCH_STATUS_BADGE[m.status] ?? 'default'}>
                             {MATCH_STATUS_LABELS[m.status] ?? m.status}
@@ -2463,6 +2548,12 @@ export function TournamentDetail() {
                 }}
                 onSwapPositions={(m1, m2) => { void handleSwapPositions(m1, m2) }}
                 playerTeamMap={new Map(tournamentPlayerRows.map((r) => [r.playerId, r.teamSide ?? '']))}
+                readOnly={tournament.status === 'draft'}
+                onCourtChange={async (matchId, courtNumber) => {
+                  await window.db.updateMatchCourtNumber(matchId, courtNumber)
+                  void handleRefresh()
+                }}
+                courtCount={tournament.courtCount}
               />
             )}
             {tab === 'standings' && (

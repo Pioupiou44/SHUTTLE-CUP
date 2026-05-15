@@ -69,6 +69,9 @@ export function registerDbHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('db:swapMatchPositions', (_event, matchId1, matchId2) =>
     matchQueries.swapMatchPositions(matchId1, matchId2)
   )
+  ipcMain.handle('db:updateMatchCourtNumber', (_event, matchId, courtNumber) =>
+    matchQueries.updateMatchCourtNumber(matchId, courtNumber)
+  )
   ipcMain.handle('db:clearTournamentMatches', (_event, tournamentId) =>
     matchQueries.clearForTournament(tournamentId)
   )

@@ -535,6 +535,11 @@ export const matchQueries = {
       db.prepare('UPDATE matches SET round = ?, courtNumber = ? WHERE id = ?').run(m1.round, m1.courtNumber, matchId2)
     })()
   },
+
+  /** Met à jour le terrain d'un match. */
+  updateMatchCourtNumber(matchId: number, courtNumber: number | null): void {
+    getDb().prepare('UPDATE matches SET courtNumber = ? WHERE id = ?').run(courtNumber, matchId)
+  },
 }
 
 // --- Admin ---

@@ -50,6 +50,8 @@ const dbApi = {
     ipcRenderer.invoke('db:swapMatchSides', matchId1, side1, matchId2, side2),
   swapMatchPositions: (matchId1: number, matchId2: number) =>
     ipcRenderer.invoke('db:swapMatchPositions', matchId1, matchId2),
+  updateMatchCourtNumber: (matchId: number, courtNumber: number | null) =>
+    ipcRenderer.invoke('db:updateMatchCourtNumber', matchId, courtNumber),
   getAllMatchScores: (tournamentId: number) => ipcRenderer.invoke('db:getAllMatchScores', tournamentId),
   clearMatchScores: (matchId: number) => ipcRenderer.invoke('db:clearMatchScores', matchId),
   clearTournamentMatches: (tournamentId: number) =>

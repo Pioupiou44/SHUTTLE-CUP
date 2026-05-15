@@ -50,6 +50,7 @@ export interface DbApi {
   // Réorganisation des matchs
   swapMatchSides: (matchId1: number, side1: 'A' | 'B', matchId2: number, side2: 'A' | 'B') => Promise<void>
   swapMatchPositions: (matchId1: number, matchId2: number) => Promise<void>
+  updateMatchCourtNumber: (matchId: number, courtNumber: number | null) => Promise<void>
   clearTournamentMatches: (tournamentId: number) => Promise<void>
 
   // Admin / dev
