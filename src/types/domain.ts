@@ -126,3 +126,52 @@ export const FORMAT_LABELS: Record<TournamentFormat, string> = {
   'swiss': 'Rondes générées selon les résultats, pas d\'élimination — appariement par niveau, Buchholz.',
   'king-of-court': 'Les vainqueurs montent de terrain, les perdants descendent — classement par victoires sur le terrain d\'honneur.',
 }
+
+// ─── Sauvegarde JSON d'un tournoi complet ────────────────────────────────────
+
+/** Format de sauvegarde/restauration d'un tournoi complet (export → fichier .json, import → restauration). */
+export interface TournamentSnapshot {
+  version: 1
+  exportedAt: string
+  tournament: {
+    name: string
+    date: string
+    location?: string
+    courtCount: number
+    poolCount: number
+    format: TournamentFormat
+    status: TournamentStatus
+    scoringRuleId?: number
+    categories: MatchCategory[]
+    teamMode: number
+    teamAName?: string
+    teamBName?: string
+    teamNames?: string[]
+  }
+  /** Joueurs inscrits — l'index dans ce tableau est utilisé comme référence dans les matchs */
+  players: Array<{
+    oldId: number
+    firstName: string
+    lastName: string
+    pseudo?: string
+    gender: Gender
+    level: string
+    club?: string
+    elo?: number
+    playerNumber?: number
+    seed?: number
+    teamSide?: string
+  }>
+  matches: Array<{
+    round?: number
+    courtNumber?: number
+    status: MatchStatus
+    category?: MatchCategory
+    comment?: string
+    /** Indices 0-based dans le tableau players */
+    teamAIndices: number[]
+    teamBIndices: number[]
+    winnerSide?: 'A' | 'B'
+    scores: Array<{ setNumber: number; scoreA: number; scoreB: number }>
+  }>
+}

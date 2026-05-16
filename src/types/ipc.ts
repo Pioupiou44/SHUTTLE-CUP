@@ -57,6 +57,9 @@ export interface DbApi {
   seedTestPlayers: () => Promise<void>
   clearAllData: () => Promise<void>
 
+  // Sauvegarde / restauration
+  importTournament: (snapshot: unknown) => Promise<{ tournamentId: number }>
+
   // Fenêtre d'affichage secondaire
   openNewWindow: (hash: string) => Promise<void>
 }

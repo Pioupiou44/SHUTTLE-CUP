@@ -601,3 +601,134 @@ function boolifyRule(row: Record<string, unknown>): Record<string, unknown> {
     isCustom: row.isCustom === 1,
   }
 }
+
+// ─── Import d'une sauvegarde JSON complète ───────────────────────────────────
+
+type SnapshotPlayer = {
+  firstName: string; lastName: string; pseudo?: string; gender: string
+  level: string; club?: string; elo?: number; playerNumber?: number
+  seed?: number; teamSide?: string
+}
+
+type SnapshotMatch = {
+  round?: number; courtNumber?: number; status: string
+  category?: string; comment?: string
+  teamAIndices: number[]; teamBIndices: number[]
+  winnerSide?: string
+  scores: Array<{ setNumber: number; scoreA: number; scoreB: number }>
+}
+
+type SnapshotPayload = {
+  version: number
+  tournament: Record<string, unknown>
+  players: SnapshotPlayer[]
+  matches: SnapshotMatch[]
+}
+
+/**
+ * Importe une sauvegarde complète d'un tournoi dans une transaction atomique.
+ * Les joueurs existants (même prénom + nom) sont réutilisés plutôt que dupliqués.
+ */
+export function importTournament(snapshot: SnapshotPayload): { tournamentId: number } {
+  const db = getDb()
+  let newTournamentId = 0
+
+  db.transaction(() => {
+    // 1. Créer le tournoi
+    const t = snapshot.tournament
+    const tResult = db.prepare(
+      'INSERT INTO tournaments (name, date, location, courtCount, poolCount, format, status, scoringRuleId, categories, teamMode, teamAName, teamBName, teamNames) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      String(t.name ?? ''), String(t.date ?? ''),
+      t.location ? String(t.location) : null,
+      Number(t.courtCount ?? 4), Number(t.poolCount ?? 2),
+      String(t.format ?? 'round-robin'), String(t.status ?? 'draft'),
+      t.scoringRuleId ? Number(t.scoringRuleId) : null,
+      Array.isArray(t.categories) ? JSON.stringify(t.categories) : '[]',
+      Number(t.teamMode ?? 0),
+      t.teamAName ? String(t.teamAName) : null,
+      t.teamBName ? String(t.teamBName) : null,
+      Array.isArray(t.teamNames) ? JSON.stringify(t.teamNames) : null,
+    )
+    newTournamentId = Number(tResult.lastInsertRowid)
+
+    // 2. Créer/retrouver les joueurs puis les inscrire au tournoi
+    const playerIdMap: number[] = []
+    for (const sp of snapshot.players) {
+      // Réutilise un joueur existant s'il a le même prénom + nom (évite les doublons)
+      let player = db.prepare(
+        'SELECT id FROM players WHERE firstName = ? AND lastName = ?'
+      ).get(sp.firstName, sp.lastName) as { id: number } | undefined
+
+      if (!player) {
+        const pResult = db.prepare(
+          'INSERT INTO players (firstName, lastName, pseudo, gender, level, club, elo, playerNumber, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          sp.firstName, sp.lastName, sp.pseudo ?? null,
+          sp.gender, sp.level, sp.club ?? null,
+          sp.elo ?? 1000, sp.playerNumber ?? null, 'active'
+        )
+        player = { id: Number(pResult.lastInsertRowid) }
+      }
+
+      db.prepare(
+        'INSERT INTO tournament_players (tournamentId, playerId, seed, teamSide) VALUES (?, ?, ?, ?)'
+      ).run(newTournamentId, player.id, sp.seed ?? null, sp.teamSide ?? null)
+
+      playerIdMap.push(player.id)
+    }
+
+    // 3. Créer les matchs avec participants et scores
+    for (const sm of snapshot.matches) {
+      const mResult = db.prepare(
+        'INSERT INTO matches (tournamentId, round, courtNumber, status, category, comment) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(
+        newTournamentId,
+        sm.round ?? null, sm.courtNumber ?? null,
+        sm.status, sm.category ?? null, sm.comment ?? null
+      )
+      const matchId = Number(mResult.lastInsertRowid)
+
+      // Insérer les participants (résolution index → joueur → tournament_player)
+      const addParticipants = (indices: number[], side: 'A' | 'B') => {
+        for (const idx of indices) {
+          if (idx < 0 || idx >= playerIdMap.length) continue
+          const playerId = playerIdMap[idx]
+          const tp = db.prepare(
+            'SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?'
+          ).get(newTournamentId, playerId) as { id: number } | undefined
+          if (tp) {
+            db.prepare(
+              'INSERT INTO match_participants (matchId, side, tournamentPlayerId) VALUES (?, ?, ?)'
+            ).run(matchId, side, tp.id)
+          }
+        }
+      }
+      addParticipants(sm.teamAIndices, 'A')
+      addParticipants(sm.teamBIndices, 'B')
+
+      // Scores set par set
+      for (const score of sm.scores) {
+        db.prepare(
+          'INSERT INTO match_scores (matchId, setNumber, scoreA, scoreB) VALUES (?, ?, ?, ?)'
+        ).run(matchId, score.setNumber, score.scoreA, score.scoreB)
+      }
+
+      // Vainqueur (winnerId = tournament_players.id du premier joueur du côté gagnant)
+      if (sm.winnerSide === 'A' || sm.winnerSide === 'B') {
+        const winnerIndices = sm.winnerSide === 'A' ? sm.teamAIndices : sm.teamBIndices
+        if (winnerIndices.length > 0) {
+          const winnerPlayerId = playerIdMap[winnerIndices[0]]
+          const winnerTp = db.prepare(
+            'SELECT id FROM tournament_players WHERE tournamentId = ? AND playerId = ?'
+          ).get(newTournamentId, winnerPlayerId) as { id: number } | undefined
+          if (winnerTp) {
+            db.prepare('UPDATE matches SET winnerId = ? WHERE id = ?').run(winnerTp.id, matchId)
+          }
+        }
+      }
+    }
+  })()
+
+  return { tournamentId: newTournamentId }
+}

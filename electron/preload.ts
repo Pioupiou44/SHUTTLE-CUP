@@ -61,6 +61,9 @@ const dbApi = {
   seedTestPlayers: () => ipcRenderer.invoke('db:seedTestPlayers'),
   clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
 
+  // Sauvegarde / restauration
+  importTournament: (snapshot: unknown) => ipcRenderer.invoke('db:importTournament', snapshot),
+
   // Fenêtre d'affichage secondaire
   openNewWindow: (hash: string) => ipcRenderer.invoke('open-new-window', hash),
 }

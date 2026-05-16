@@ -7,6 +7,7 @@ import {
   tournamentPlayerQueries,
   matchQueries,
   adminQueries,
+  importTournament,
 } from './queries'
 
 // ─── Helpers de validation ────────────────────────────────────────────────────
@@ -129,4 +130,15 @@ export function registerDbHandlers(ipcMain: IpcMain): void {
     ipcMain.handle('db:seedTestPlayers', () => adminQueries.seedTestPlayers())
     ipcMain.handle('db:clearAllData', () => adminQueries.clearAllData())
   }
+
+  // Sauvegarde / restauration d'un tournoi complet
+  ipcMain.handle('db:importTournament', (_event, snapshot: unknown) => {
+    if (!snapshot || typeof snapshot !== 'object') throw new Error('Données de sauvegarde invalides')
+    const s = snapshot as Record<string, unknown>
+    if (s['version'] !== 1) throw new Error('Version de sauvegarde non prise en charge')
+    if (!s['tournament'] || !Array.isArray(s['players']) || !Array.isArray(s['matches'])) {
+      throw new Error('Structure de sauvegarde invalide')
+    }
+    return importTournament(s as Parameters<typeof importTournament>[0])
+  })
 }

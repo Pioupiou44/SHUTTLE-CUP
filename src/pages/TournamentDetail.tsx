@@ -2665,6 +2665,65 @@ export function TournamentDetail() {
     a.click(); URL.revokeObjectURL(url)
   }
 
+  const handleExportBackup = () => {
+    // Construit la map index → joueur pour les références de matchs
+    const playerIdToIndex = new Map<number, number>()
+    const snapshotPlayers = participantPlayers.map((p, idx) => {
+      playerIdToIndex.set(p.id, idx)
+      const row = tournamentPlayerRows.find((r) => r.playerId === p.id)
+      return {
+        oldId: p.id,
+        firstName: p.firstName, lastName: p.lastName,
+        pseudo: p.pseudo, gender: p.gender, level: p.level,
+        club: p.club, elo: p.elo, playerNumber: p.playerNumber,
+        seed: row?.seed, teamSide: row?.teamSide,
+      }
+    })
+
+    const snapshotMatches = matches.map((m) => {
+      const teamAIds = m.teamA ? m.teamA.split(',').map(Number) : []
+      const teamBIds = m.teamB ? m.teamB.split(',').map(Number) : []
+      const scores = (allScores.get(m.id) ?? []).map((s) => ({
+        setNumber: s.setNumber, scoreA: s.scoreA, scoreB: s.scoreB,
+      }))
+      return {
+        round: m.round, courtNumber: m.courtNumber,
+        status: m.status, category: m.category, comment: m.comment,
+        teamAIndices: teamAIds.map((id) => playerIdToIndex.get(id) ?? -1).filter((i) => i >= 0),
+        teamBIndices: teamBIds.map((id) => playerIdToIndex.get(id) ?? -1).filter((i) => i >= 0),
+        winnerSide: m.winnerSide,
+        scores,
+      }
+    })
+
+    const snapshot = {
+      version: 1 as const,
+      exportedAt: new Date().toISOString(),
+      tournament: {
+        name: tournament.name, date: tournament.date,
+        location: tournament.location, courtCount: tournament.courtCount,
+        poolCount: tournament.poolCount, format: tournament.format,
+        status: tournament.status, scoringRuleId: tournament.scoringRuleId,
+        categories: tournament.categories, teamMode: tournament.teamMode,
+        teamAName: tournament.teamAName, teamBName: tournament.teamBName,
+        teamNames: tournament.teamNames,
+      },
+      players: snapshotPlayers,
+      matches: snapshotMatches,
+    }
+
+    const json = JSON.stringify(snapshot, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const slug = tournament.name.replace(/\s+/g, '-').toLowerCase()
+    const date = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `sauvegarde-${slug}-${date}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const handleArchive = async () => {
     await updateTournament(tournamentId, { status: 'archived' })
     setConfirming(null)
@@ -2866,11 +2925,21 @@ export function TournamentDetail() {
                   <Download size={13} className="mr-1 inline" />
                   Export CSV
                 </Button>
+                <Button variant="secondary" size="sm" onClick={handleExportBackup}>
+                  <Download size={13} className="mr-1 inline" />
+                  Sauvegarder
+                </Button>
                 <Button variant="secondary" size="sm" onClick={() => navigate(`/tournaments/${tournamentId}/print`)}>
                   <Printer size={13} className="mr-1 inline" />
                   Imprimer
                 </Button>
               </>
+            )}
+            {tournament.status === 'draft' && confirming === null && (
+              <Button variant="secondary" size="sm" onClick={handleExportBackup}>
+                <Download size={13} className="mr-1 inline" />
+                Sauvegarder
+              </Button>
             )}
           </div>
         </div>

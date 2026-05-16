@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTournamentsStore } from '@/store/tournamentsStore'
 import { Button, Badge, Modal } from '@/components/ui'
-import { Plus, Trash2, ChevronRight, Archive } from 'lucide-react'
+import { Plus, Trash2, ChevronRight, Archive, Upload } from 'lucide-react'
 import type { Tournament } from '@/types/domain'
 
 const STATUS_LABELS: Record<Tournament['status'], string> = {
@@ -35,6 +35,9 @@ export function TournamentsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Tournament | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<Tournament | null>(null)
   const [filter, setFilter] = useState<Tournament['status'] | 'all'>('all')
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { void fetchTournaments() }, [fetchTournaments])
 
@@ -50,6 +53,25 @@ export function TournamentsPage() {
     if (archiveTarget) { await updateTournament(archiveTarget.id, { status: 'archived' }); setArchiveTarget(null) }
   }
 
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImportError(null)
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const snapshot: unknown = JSON.parse(text)
+      const result = await window.db.importTournament(snapshot)
+      await fetchTournaments()
+      navigate(`/tournaments/${result.tournamentId}`)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Fichier invalide')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   return (
     <div className="p-8 max-w-5xl">
       {/* En-tête */}
@@ -62,11 +84,29 @@ export function TournamentsPage() {
             {tournaments.length} tournoi{tournaments.length !== 1 ? 's' : ''} au total
           </p>
         </div>
-        <Button className="mt-1 shrink-0" onClick={() => navigate('/tournaments/new')}>
-          <Plus size={13} className="mr-1 inline" />
-          Nouveau tournoi
-        </Button>
+        <div className="flex gap-2 mt-1 shrink-0">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={(e) => { void handleImportFile(e) }}
+          />
+          <Button variant="secondary" className="shrink-0" disabled={importing} onClick={() => fileInputRef.current?.click()}>
+            <Upload size={13} className="mr-1 inline" />
+            {importing ? 'Import…' : 'Restaurer'}
+          </Button>
+          <Button className="shrink-0" onClick={() => navigate('/tournaments/new')}>
+            <Plus size={13} className="mr-1 inline" />
+            Nouveau tournoi
+          </Button>
+        </div>
       </div>
+      {importError && (
+        <div className="mb-4 px-4 py-3 border-2 border-warn bg-bg font-sans text-[13px] text-warn">
+          Restauration impossible : {importError}
+        </div>
+      )}
 
       {/* Filtres statut */}
       <div className="flex gap-2 mb-6 flex-wrap">
