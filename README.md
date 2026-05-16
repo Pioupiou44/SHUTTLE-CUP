@@ -479,10 +479,8 @@ Génération automatique selon le format choisi au step 3 du wizard :
 | `double-elimination` | `generateSingleElim` | ✅ | Double élimination |
 | `pool+knockout` | `generatePoolPlusKnockout` | ✅ | Poules + tableau final (utilise `poolCount`) |
 | `americano` | `generateAmericano` | ✅ | Partenaires rotatifs |
-| `swiss` | `generateSwissRound1` + `generateNextSwissRound` | ⏳ désactivé | Système suisse — appariement Buchholz, rondes dynamiques |
-| `king-of-court` | `generateKingOfCourtRound1` + `generateNextKingOfCourtRound` | ⏳ désactivé | Roi du court — vainqueurs montent, perdants descendent |
-
-> **Swiss & King of Court** : les générateurs sont opérationnels et la logique de rondes dynamiques est en place (bouton "Ronde N ▶" dans l'onglet Planning). Ces formats sont actuellement **désactivés dans le wizard** (`disabled: true` dans `FORMAT_OPTIONS`) en attente d'une validation complète en tournoi réel.
+| `swiss` | `generateSwissRound1` + `generateNextSwissRound` | ✅ | Système suisse — appariement Buchholz, rondes dynamiques |
+| `king-of-court` | `generateKingOfCourtRound1` + `generateNextKingOfCourtRound` | ✅ | Roi du court — vainqueurs montent, perdants descendent |
 
 ### Classements par format
 
@@ -580,9 +578,10 @@ export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 | **7 · Règles de scoring custom** | ✅ | Éditeur complet dans Paramètres (sets, points, déuce, golden point) |
 | **8 · Classements** | ✅ | Général, américano (pts cumulés), Swiss (Buchholz), King of Court (V terrain 1) |
 | **9 · Impression** | ✅ | Vue `/print` : planning, classements, résultats avec logo et pied de page |
-| **10 · Engine Swiss & King of Court** | ✅ | Générateurs + rondes dynamiques — désactivés dans le wizard (validation en cours) |
+| **Sécurité IPC** | ✅ | Validation entrées IPC (IDs, enum statuts, scores), guard prod (`clearAllData` dev-only), hash fenêtre sanitisé |
+| **10 · Engine Swiss & King of Court** | ✅ | Générateurs + rondes dynamiques (bouton "Ronde N ▶" dans l'onglet Planning) |
 | **11 · Distribution v1.0.1-beta** | ✅ | macOS (arm64 + x64 notarisés), Windows NSIS, Linux AppImage + deb |
-| **12 · Activation Swiss & KoC wizard** | ⏳ | Activer les formats dans le wizard après validation terrain |
+| **12 · Activation Swiss & KoC wizard** | ✅ | Swiss & King of Court activés dans le wizard — étapes, preview, validation min. 4 joueurs |
 | **13 · Archives & export** | ✅ | Export CSV joueurs (+ N° dossard, normalisation H→M), export classement + résultats matchs par tournoi |
 | **14 · Tests** | ⏳ | Vitest pour l'engine (générateurs, scoring, standings) |
 
