@@ -583,7 +583,8 @@ export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 | **11 · Distribution v1.0.1-beta** | ✅ | macOS (arm64 + x64 notarisés), Windows NSIS, Linux AppImage + deb |
 | **12 · Activation Swiss & KoC wizard** | ✅ | Swiss & King of Court activés dans le wizard — étapes, preview, validation min. 4 joueurs |
 | **13 · Archives & export** | ✅ | Export CSV joueurs (+ N° dossard, normalisation H→M), export classement + résultats matchs par tournoi |
-| **14 · Tests** | ✅ | Vitest — 94 tests (scoring, standings, roundRobin, Swiss) — `npm run test` |
+| **14 · Tests** | ✅ | Vitest — 171 tests (scoring, standings, roundRobin, Swiss, américano, KoC, singleElim, poolPlusKnockout) — `npm run test` |
+| **15 · Sauvegarde JSON** | ✅ | Export/import d'un tournoi complet (joueurs, matchs, scores) en `.json` — bouton « Sauvegarder » + « Restaurer » |
 
 ---
 
