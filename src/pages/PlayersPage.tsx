@@ -154,8 +154,8 @@ function parseCSV(text: string): Partial<PlayerFormData>[] {
       level: level || 'D7',
       pseudo:       pseudo       || undefined,
       club:         club         || undefined,
-      elo:          elo          ? Number(elo)          : undefined,
-      playerNumber: playerNumber ? Number(playerNumber) : undefined,
+      elo:          elo          ? (isNaN(Number(elo))          ? undefined : Number(elo))          : undefined,
+      playerNumber: playerNumber ? (isNaN(Number(playerNumber)) ? undefined : Number(playerNumber)) : undefined,
     }
   }).filter((p) => p.firstName && p.lastName)
 }

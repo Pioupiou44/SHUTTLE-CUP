@@ -251,8 +251,6 @@ export const tournamentPlayerQueries = {
 
 // --- Matchs ---
 
-// --- Matchs ---
-
 export const matchQueries = {
   /** Supprime tous les matchs (+ participants + scores) d'un tournoi — pour réinitialiser avant régénération. */
   clearForTournament(tournamentId: number): void {

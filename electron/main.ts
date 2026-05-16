@@ -6,7 +6,10 @@ import { registerDbHandlers } from './db/handlers'
 const isDev = !app.isPackaged
 
 // Ouvre une nouvelle fenêtre d'affichage (standalone) sur le hash donné
+// Validation : uniquement des hash de routage valides (segments alphanum, /, -, _, =, ?)
+const SAFE_HASH_RE = /^[a-zA-Z0-9\-_/=?&%]+$/
 ipcMain.handle('open-new-window', async (_event, hash: string) => {
+  if (typeof hash !== 'string' || !SAFE_HASH_RE.test(hash)) return
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
