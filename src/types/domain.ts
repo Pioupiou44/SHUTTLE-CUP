@@ -123,6 +123,6 @@ export const FORMAT_LABELS: Record<TournamentFormat, string> = {
   'double-elimination': 'Deux défaites pour être éliminé — tableau principal + repêchage.',
   'pool+knockout': 'Phase de poules puis tableau final généré automatiquement selon le classement. Recommandé pour les tournois de club.',
   'americano': 'Partenaires et adversaires changent à chaque ronde selon les scores — adapté en doubles.',
-  'swiss': 'Rondes générées en fonction des résultats, pas d\'élimination (bientôt disponible)',
-  'king-of-court': 'Les vainqueurs restent sur le terrain, les perdants tournent (bientôt disponible)',
+  'swiss': 'Rondes générées selon les résultats, pas d\'élimination — appariement par niveau, Buchholz.',
+  'king-of-court': 'Les vainqueurs montent de terrain, les perdants descendent — classement par victoires sur le terrain d\'honneur.',
 }

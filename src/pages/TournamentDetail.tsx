@@ -10,7 +10,9 @@ import { generateRoundRobin } from '@/engine/generators/roundRobin'
 import { generateSingleElim } from '@/engine/generators/singleElim'
 import { generateAmericano } from '@/engine/generators/americano'
 import { generatePoolPlusKnockout } from '@/engine/generators/poolPlusKnockout'
-import { computeStandings } from '@/engine/standings'
+import { generateKingOfCourtRound1, generateNextKingOfCourtRound } from '@/engine/generators/kingOfCourt'
+import { generateSwissRound1, generateNextSwissRound } from '@/engine/generators/swiss'
+import { computeStandings, computeAmericanoStandings, computeSwissStandings, computeKingOfCourtStandings } from '@/engine/standings'
 import { computeMatchResult } from '@/engine/scoring'
 import type { Match, MatchScore, MatchCategory, ScoringRule, Player } from '@/types/domain'
 
@@ -822,6 +824,9 @@ function PlanningTab({
   readOnly = false,
   onCourtChange,
   courtCount,
+  onNextRound,
+  canNextRound = false,
+  nextRoundNumber = 2,
 }: {
   matches: Match[]
   tournamentId: number
@@ -840,6 +845,9 @@ function PlanningTab({
   readOnly?: boolean
   onCourtChange?: (matchId: number, courtNumber: number | null) => void
   courtCount?: number
+  onNextRound?: () => void
+  canNextRound?: boolean
+  nextRoundNumber?: number
 }) {
   const [filterCat, setFilterCat] = useState<MatchCategory | 'all'>('all')
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null)
@@ -1064,6 +1072,26 @@ function PlanningTab({
           </button>
         </div>
       )}
+      {canNextRound && onNextRound && (
+        <div className="flex items-center gap-4 p-4 border-2 border-green bg-bg-strong">
+          <div className="flex-1">
+            <p className="font-black uppercase text-[14px] tracking-[-0.01em] text-ink">
+              Ronde {nextRoundNumber - 1} terminée !
+            </p>
+            <p className="font-sans text-[13px] text-ink-2 mt-0.5">
+              {tournamentFormat === 'swiss'
+                ? 'Générez la ronde suivante — les adversaires sont sélectionnés par niveau (Buchholz).'
+                : 'Générez la ronde suivante — les vainqueurs montent de terrain, les perdants descendent.'}
+            </p>
+          </div>
+          <button
+            onClick={onNextRound}
+            className="shrink-0 px-4 py-2.5 bg-ink text-green-fluo font-black uppercase text-[12px] tracking-[0.05em] border-2 border-ink hover:opacity-80 transition-opacity"
+          >
+            Ronde {nextRoundNumber} ▶
+          </button>
+        </div>
+      )}
       {hasCats && categories.length > 1 && (
         <div className="flex gap-2 flex-wrap">
           {(['all', ...categories] as const).map((c) => (
@@ -1276,6 +1304,7 @@ function StandingsTab({
   rule,
   players,
   allPlayerNames,
+  tournamentFormat = 'round-robin',
 }: {
   tournamentPlayers: number[]
   matches: Match[]
@@ -1283,12 +1312,34 @@ function StandingsTab({
   rule: ScoringRule | undefined
   players: ReturnType<typeof usePlayersStore.getState>['players']
   allPlayerNames: Map<number, string>
+  tournamentFormat?: string
 }) {
   const standings = useMemo(() => {
     if (matches.length === 0 || tournamentPlayers.length === 0) return []
     const playerNames = new Map(players.map((p) => [p.id, playerDisplayName(p)]))
     return computeStandings(tournamentPlayers, playerNames, matches, allScores, rule)
   }, [matches, allScores, tournamentPlayers, players, rule])
+
+  // Classement américano (points cumulés individuels)
+  const americanoStandings = useMemo(() => {
+    if (tournamentFormat !== 'americano' || matches.length === 0 || tournamentPlayers.length === 0) return []
+    const playerNames = new Map(players.map((p) => [p.id, playerDisplayName(p)]))
+    return computeAmericanoStandings(tournamentPlayers, playerNames, matches, allScores)
+  }, [tournamentFormat, matches, allScores, tournamentPlayers, players])
+
+  // Classement Swiss avec Buchholz
+  const swissStandings = useMemo(() => {
+    if (tournamentFormat !== 'swiss' || matches.length === 0 || tournamentPlayers.length === 0) return []
+    const playerNames = new Map(players.map((p) => [p.id, playerDisplayName(p)]))
+    return computeSwissStandings(tournamentPlayers, playerNames, matches, allScores)
+  }, [tournamentFormat, matches, allScores, tournamentPlayers, players])
+
+  // Classement King of Court (victoires terrain 1 → total victoires → points)
+  const kingOfCourtStandings = useMemo(() => {
+    if (tournamentFormat !== 'king-of-court' || matches.length === 0 || tournamentPlayers.length === 0) return []
+    const playerNames = new Map(players.map((p) => [p.id, playerDisplayName(p)]))
+    return computeKingOfCourtStandings(tournamentPlayers, playerNames, matches, allScores)
+  }, [tournamentFormat, matches, allScores, tournamentPlayers, players])
 
   // Classement par paires — pour les matchs doubles (teamA contient plusieurs IDs)
   const pairStandings = useMemo(() => {
@@ -1297,16 +1348,117 @@ function StandingsTab({
     return computePoolTeamStandings(doublesMatches, allScores, allPlayerNames)
   }, [matches, allScores, allPlayerNames])
 
-  if (standings.length === 0) {
+  // Détermine si les classements sont vides selon le format
+  const hasNoData = (() => {
+    if (tournamentFormat === 'americano') return americanoStandings.length === 0
+    if (tournamentFormat === 'swiss') return swissStandings.length === 0
+    if (tournamentFormat === 'king-of-court') return kingOfCourtStandings.length === 0
+    return standings.length === 0
+  })()
+
+  if (hasNoData) {
     return (
       <div className="flex flex-col gap-2">
-        {!rule && matches.length > 0 && (
+        {!rule && matches.length > 0 && tournamentFormat !== 'swiss' && tournamentFormat !== 'king-of-court' && (
           <p className="font-mono text-[11px] text-warn font-bold uppercase tracking-[0.06em] border-l-2 border-warn pl-3">
             Aucune règle de score configurée — le classement nécessite une règle.
           </p>
         )}
         <p className="font-sans text-[14px] text-ink-3">
           {matches.length === 0 ? 'Lancez le tournoi pour générer les matchs.' : 'En attente des premiers résultats.'}
+        </p>
+      </div>
+    )
+  }
+
+  // ── Américano : classement par points cumulés individuels ─────────────────
+  if (tournamentFormat === 'americano' && americanoStandings.length > 0) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col border-2 border-line">
+          <div className="grid grid-cols-[32px_1fr_60px_60px_60px_80px] bg-ink px-4 py-3">
+            {['#', 'Joueur', 'MJ', 'V', 'D', 'Pts cumulés'].map((h) => (
+              <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
+            ))}
+          </div>
+          {americanoStandings.map((entry, i) => (
+            <div key={entry.playerId}
+              className={`grid grid-cols-[32px_1fr_60px_60px_60px_80px] items-center px-4 py-3
+                border-b border-line-soft ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
+              <span className={`text-[11px] font-mono font-bold ${i === 0 ? 'text-blue' : 'text-ink-3'}`}>{i + 1}</span>
+              <span className="font-sans font-bold text-[14px] text-ink">{entry.playerName}</span>
+              <span className="font-mono text-[13px] text-ink-3">{entry.matchesPlayed}</span>
+              <span className="font-mono text-[14px] text-green font-bold">{entry.wins}</span>
+              <span className="font-mono text-[14px] text-ink-3">{entry.losses}</span>
+              <span className={`font-mono font-bold text-[14px] ${i === 0 ? 'text-blue' : 'text-ink'}`}>{entry.totalPoints}</span>
+            </div>
+          ))}
+        </div>
+        <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
+          Classement américano — rang par points cumulés (somme de tous les points marqués dans tous les matchs).
+        </p>
+      </div>
+    )
+  }
+
+  // ── Swiss : classement par points suisses + Buchholz ──────────────────────
+  if (tournamentFormat === 'swiss' && swissStandings.length > 0) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col border-2 border-line">
+          <div className="grid grid-cols-[32px_1fr_60px_60px_60px_80px_80px] bg-ink px-4 py-3">
+            {['#', 'Joueur', 'MJ', 'V', 'D', 'Pts Swiss', 'Buchholz'].map((h) => (
+              <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
+            ))}
+          </div>
+          {swissStandings.map((entry, i) => (
+            <div key={entry.playerId}
+              className={`grid grid-cols-[32px_1fr_60px_60px_60px_80px_80px] items-center px-4 py-3
+                border-b border-line-soft ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
+              <span className={`text-[11px] font-mono font-bold ${i === 0 ? 'text-blue' : 'text-ink-3'}`}>{i + 1}</span>
+              <span className="font-sans font-bold text-[14px] text-ink">{entry.playerName}</span>
+              <span className="font-mono text-[13px] text-ink-3">{entry.matchesPlayed}</span>
+              <span className="font-mono text-[14px] text-green font-bold">{entry.wins}</span>
+              <span className="font-mono text-[14px] text-ink-3">{entry.losses}</span>
+              <span className={`font-mono font-bold text-[14px] ${i === 0 ? 'text-blue' : 'text-ink'}`}>{entry.swissPoints}</span>
+              <span className="font-mono text-[13px] text-ink-3">{entry.buchholz}</span>
+            </div>
+          ))}
+        </div>
+        <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
+          Pts Swiss : 2=victoire, 1=défaite, +2 bye silencieux. Buchholz = somme des points suisses des adversaires.
+        </p>
+      </div>
+    )
+  }
+
+  // ── King of Court : classement par victoires terrain 1 ────────────────────
+  if (tournamentFormat === 'king-of-court' && kingOfCourtStandings.length > 0) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col border-2 border-line">
+          <div className="grid grid-cols-[32px_1fr_60px_80px_80px_80px] bg-ink px-4 py-3">
+            {['#', 'Joueur', 'MJ', 'V T1 👑', 'Total V', 'Pts'].map((h) => (
+              <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
+            ))}
+          </div>
+          {kingOfCourtStandings.map((entry, i) => (
+            <div key={entry.playerId}
+              className={`grid grid-cols-[32px_1fr_60px_80px_80px_80px] items-center px-4 py-3
+                border-b border-line-soft ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
+              <span className={`text-[11px] font-mono font-bold ${i === 0 ? 'text-blue' : 'text-ink-3'}`}>{i + 1}</span>
+              <span className="font-sans font-bold text-[14px] text-ink">{entry.playerName}</span>
+              <span className="font-mono text-[13px] text-ink-3">{entry.matchesPlayed}</span>
+              <span className={`font-mono font-bold text-[14px] ${i === 0 ? 'text-blue' : entry.winsOnCourt1 > 0 ? 'text-green' : 'text-ink-3'}`}>
+                {entry.winsOnCourt1}
+              </span>
+              <span className="font-mono text-[14px] text-green font-bold">{entry.totalWins}</span>
+              <span className="font-mono text-[13px] text-ink-3">{entry.totalPoints}</span>
+            </div>
+          ))}
+        </div>
+        <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
+          Classement King of Court — rang par victoires sur le terrain 1 (trône), puis total victoires, puis points cumulés.
         </p>
       </div>
     )
@@ -2118,6 +2270,12 @@ export function TournamentDetail() {
             case 'americano':
               generated = generateAmericano(fakeIds, { tournamentId, courtCount: tournament.courtCount })
               break
+            case 'king-of-court':
+              generated = generateKingOfCourtRound1(fakeIds, { tournamentId, courtCount: tournament.courtCount })
+              break
+            case 'swiss':
+              generated = generateSwissRound1(fakeIds, { tournamentId, courtCount: tournament.courtCount })
+              break
             default:
               generated = generateRoundRobin(fakeIds, { tournamentId, courtCount: tournament.courtCount })
           }
@@ -2231,6 +2389,12 @@ export function TournamentDetail() {
             case 'americano':
               generated = generateAmericano(playerPool, { tournamentId, courtCount: tournament.courtCount })
               break
+            case 'king-of-court':
+              generated = generateKingOfCourtRound1(playerPool, { tournamentId, courtCount: tournament.courtCount })
+              break
+            case 'swiss':
+              generated = generateSwissRound1(playerPool, { tournamentId, courtCount: tournament.courtCount })
+              break
             default:
               generated = generateRoundRobin(playerPool, { tournamentId, courtCount: tournament.courtCount })
           }
@@ -2280,6 +2444,116 @@ export function TournamentDetail() {
 
   // Met à jour le ref pour que l'useEffect d'auto-génération puisse appeler handleGenerate
   handleGenerateRef.current = handleGenerate
+
+  // ── Génération dynamique de la ronde suivante (King of Court / Swiss) ─────────────────
+  const isDynamicFormat = tournament.format === 'king-of-court' || tournament.format === 'swiss'
+
+  const currentDynamicRound = useMemo(() => {
+    if (!isDynamicFormat) return 0
+    const rounds = matches.map((m) => m.round ?? 0).filter((n) => n > 0)
+    return rounds.length === 0 ? 0 : Math.max(...rounds)
+  }, [matches, isDynamicFormat])
+
+  const canNextDynamicRound = useMemo(() => {
+    if (!isDynamicFormat || tournament.status !== 'active' || currentDynamicRound === 0) return false
+    const currentRoundMatches = matches.filter((m) => m.round === currentDynamicRound)
+    return (
+      currentRoundMatches.length > 0 &&
+      currentRoundMatches.every((m) => m.status === 'completed' || m.status === 'walkover')
+    )
+  }, [matches, isDynamicFormat, tournament.status, currentDynamicRound])
+
+  const handleGenerateNextRound = async () => {
+    if (!canNextDynamicRound) return
+    const nextRound = currentDynamicRound + 1
+    try {
+      const prevRoundMatches = matches.filter((m) => m.round === currentDynamicRound)
+
+      // Unités connues (team strings) de toutes les rondes passées
+      const allKnownUnits = new Set<string>()
+      for (const m of matches) {
+        if (m.teamA) allKnownUnits.add(m.teamA)
+        if (m.teamB) allKnownUnits.add(m.teamB)
+      }
+      const inCurrentRound = new Set<string>()
+      for (const m of prevRoundMatches) {
+        if (m.teamA) inCurrentRound.add(m.teamA)
+        if (m.teamB) inCurrentRound.add(m.teamB)
+      }
+      const queueUnits = [...allKnownUnits].filter((u) => !inCurrentRound.has(u))
+
+      // Catégories présentes dans la ronde en cours (pour conserver les catégories)
+      const cats = [...new Set(prevRoundMatches.map((m) => m.category ?? undefined))]
+      const categoriesToProcess: (string | undefined)[] = cats.length > 0 ? cats : [undefined]
+
+      for (const cat of categoriesToProcess) {
+        const catPrevMatches = cat
+          ? prevRoundMatches.filter((m) => m.category === cat)
+          : prevRoundMatches
+
+        let newMatches: Omit<Match, 'id' | 'winnerId' | 'comment'>[]
+        if (tournament.format === 'king-of-court') {
+          newMatches = generateNextKingOfCourtRound(catPrevMatches, queueUnits, nextRound, {
+            tournamentId,
+            courtCount: tournament.courtCount,
+          })
+        } else {
+          // Swiss : utilise tous les matchs complétés (toutes rondes)
+          const catAllMatches = cat
+            ? matches.filter((m) => m.category === cat)
+            : matches
+          // Reconstruit la liste d'unités à partir de la première ronde
+          const round1 = matches.filter((m) => m.round === 1 && (cat ? m.category === cat : true))
+          const allUnitsOrdered: number[] = []
+          for (const m of round1) {
+            const a = parseInt(m.teamA ?? '', 10)
+            const b = parseInt(m.teamB ?? '', 10)
+            if (!isNaN(a) && !allUnitsOrdered.includes(a)) allUnitsOrdered.push(a)
+            if (!isNaN(b) && !allUnitsOrdered.includes(b)) allUnitsOrdered.push(b)
+          }
+          // Ajoute les joueurs absents de la ronde 1 (bye round 1)
+          for (const id of tournamentPlayers) {
+            if (!allUnitsOrdered.includes(id)) allUnitsOrdered.push(id)
+          }
+          newMatches = generateNextSwissRound(allUnitsOrdered, catAllMatches, nextRound, {
+            tournamentId,
+            courtCount: tournament.courtCount,
+          })
+        }
+
+        for (const m of newMatches) {
+          const teamAIds = (m.teamA ?? '').split(',').map(Number).filter((n) => !isNaN(n) && n > 0)
+          const teamBIds = (m.teamB ?? '').split(',').map(Number).filter((n) => !isNaN(n) && n > 0)
+          if (teamAIds.length > 1 || teamBIds.length > 1) {
+            // Doubles
+            await window.db.createMatchWithTeams({
+              tournamentId,
+              round: m.round,
+              courtNumber: m.courtNumber,
+              teamAPlayerIds: teamAIds,
+              teamBPlayerIds: teamBIds,
+              category: cat as import('@/types/domain').MatchCategory | undefined,
+            })
+          } else if (teamAIds.length === 1 && teamBIds.length === 1) {
+            // Singles
+            await window.db.createMatch({
+              tournamentId,
+              round: m.round,
+              courtNumber: m.courtNumber,
+              playerAId: teamAIds[0],
+              playerBId: teamBIds[0],
+              category: cat as import('@/types/domain').MatchCategory | undefined,
+            })
+          }
+        }
+      }
+
+      void handleRefresh()
+    } catch (err) {
+      console.error('Erreur génération ronde suivante:', err)
+    }
+  }
+
   const handleReset = async () => {
     setResetting(true)
     setSwapMode(false)
@@ -2329,7 +2603,7 @@ export function TournamentDetail() {
 
   // ─── Onglets ───────────────────────────────────────────────────────────────
   const isElimFormat = ['knockout', 'double-elimination', 'pool+knockout'].includes(tournament.format)
-  const hasRoundRobinPhase = ['round-robin', 'americano', 'pool+knockout'].includes(tournament.format)
+  const hasRoundRobinPhase = ['round-robin', 'americano', 'pool+knockout', 'king-of-court', 'swiss'].includes(tournament.format)
 
   const TABS: { id: TabId; label: string; icon: React.ElementType; show?: boolean }[] = [
     { id: 'planning',  label: 'Planning',   icon: List },
@@ -2602,6 +2876,9 @@ export function TournamentDetail() {
                   void handleRefresh()
                 }}
                 courtCount={tournament.courtCount}
+                onNextRound={canNextDynamicRound ? () => handleGenerateNextRound() : undefined}
+                canNextRound={canNextDynamicRound}
+                nextRoundNumber={currentDynamicRound + 1}
               />
             )}
             {tab === 'standings' && (
@@ -2612,6 +2889,7 @@ export function TournamentDetail() {
                 rule={rule}
                 players={players}
                 allPlayerNames={allPlayerNames}
+                tournamentFormat={tournament.format}
               />
             )}
             {tab === 'pools' && (
