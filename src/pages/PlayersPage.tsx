@@ -427,9 +427,10 @@ export function PlayersPage() {
         {isLoading ? (
           <p className="font-sans text-[14px] text-ink-3">Chargement…</p>
         ) : (
-          <div className="border-2 border-line">
+          <div className="overflow-x-auto">
+          <div className="border-2 border-line min-w-[900px]">
             {/* En-têtes avec tri */}
-            <div className="grid grid-cols-[48px_140px_120px_120px_44px_120px_1fr_60px_80px_80px] bg-ink">
+            <div className="grid grid-cols-[72px_minmax(150px,1fr)_110px_110px_44px_110px_minmax(100px,1fr)_56px_72px_72px] bg-ink">
               {([
                 ['N° Doss.',  'playerNumber'],
                 ['Nom',     'lastName'],
@@ -476,7 +477,7 @@ export function PlayersPage() {
               sortedFiltered.map((player, i) => (
                 <div
                   key={player.id}
-                  className={`grid grid-cols-[48px_140px_120px_120px_44px_120px_1fr_60px_80px_80px] items-center px-4 py-3
+                  className={`grid grid-cols-[72px_minmax(150px,1fr)_110px_110px_44px_110px_minmax(100px,1fr)_56px_72px_72px] items-center px-4 py-3
                     border-b border-line-soft transition-colors hover:bg-bg-strong group
                     ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}
                 >
@@ -536,8 +537,7 @@ export function PlayersPage() {
                 </div>
               ))
             )}
-          </div>
-        )}
+          </div>          </div>        )}
       </div>
 
       {/* Modal création / édition */}
