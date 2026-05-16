@@ -138,17 +138,24 @@ function PlayerForm({
 
 function parseCSV(text: string): Partial<PlayerFormData>[] {
   const lines = text.trim().split('\n').filter(Boolean)
-  const start = lines[0]?.toLowerCase().includes('prenom') ||
-                lines[0]?.toLowerCase().includes('firstname') ? 1 : 0
+  // Ignore la ligne d'en-tête si présente
+  const hasHeader = /prenom|firstname|nom|name|genre|gender/i.test(lines[0] ?? '')
+  const start = hasHeader ? 1 : 0
   return lines.slice(start).map((line) => {
-    const [firstName, lastName, gender, level, pseudo, club, elo] = line.split(/[,;]/).map((s) => s.trim())
+    const cols = line.split(/[,;]/).map((s) => s.trim().replace(/^"|"$/g, ''))
+    const [firstName, lastName, gender, level, pseudo, club, elo, playerNumber] = cols
+    // Normalise 'H'/'h' → 'M' pour les fichiers issus de logiciels français
+    const g = gender?.toUpperCase()
+    const normalizedGender: Gender = g === 'H' ? 'M' : g === 'F' ? 'F' : 'M'
     return {
-      firstName, lastName,
-      gender: gender as Gender,
-      level: level ?? 'D7',
-      pseudo,
-      club,
-      elo: elo ? Number(elo) : 1000,
+      firstName,
+      lastName,
+      gender: normalizedGender,
+      level: level || 'D7',
+      pseudo:       pseudo       || undefined,
+      club:         club         || undefined,
+      elo:          elo          ? Number(elo)          : undefined,
+      playerNumber: playerNumber ? Number(playerNumber) : undefined,
     }
   }).filter((p) => p.firstName && p.lastName)
 }
@@ -277,14 +284,14 @@ export function PlayersPage() {
   }
 
   const handleExport = () => {
-    const header = 'Prenom,Nom,Genre,Classement,Pseudo,Club,ELO'
+    const header = 'Prenom,Nom,Genre,Classement,Pseudo,Club,ELO,N_Dossard'
     const rows = filtered.map((p) =>
-      [p.firstName, p.lastName, p.gender, p.level, p.pseudo ?? '', p.club ?? '', p.elo ?? ''].join(',')
+      [p.firstName, p.lastName, p.gender, p.level, p.pseudo ?? '', p.club ?? '', p.elo ?? '', p.playerNumber ?? ''].join(',')
     )
     const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url
-    a.download = `roster-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `joueurs-${new Date().toISOString().slice(0, 10)}.csv`
     a.click(); URL.revokeObjectURL(url)
   }
 
@@ -595,19 +602,20 @@ export function PlayersPage() {
         }
       >
         <div className="max-h-64 overflow-y-auto scrollbar-light">
-          <div className="grid grid-cols-[1fr_60px_80px_100px_60px] bg-ink px-3 py-2 sticky top-0">
-            {['Nom', 'G.', 'Niveau', 'Club', 'ELO'].map((h) => (
+          <div className="grid grid-cols-[1fr_50px_80px_100px_60px_70px] bg-ink px-3 py-2 sticky top-0">
+            {['Nom', 'G.', 'Niveau', 'Club', 'ELO', 'Dossard'].map((h) => (
               <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
             ))}
           </div>
           {csvPreview?.map((p, i) => (
-            <div key={i} className={`grid grid-cols-[1fr_60px_80px_100px_60px] px-3 py-2 border-b border-line-soft
+            <div key={i} className={`grid grid-cols-[1fr_50px_80px_100px_60px_70px] px-3 py-2 border-b border-line-soft
               ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}>
               <span className="font-sans text-[14px] text-ink">{p.firstName} {p.lastName}</span>
               <span className="text-[11px] font-mono text-ink">{p.gender}</span>
               <span className="text-[11px] font-mono text-ink">{p.level}</span>
               <span className="text-[11px] font-mono text-ink">{p.club ?? '—'}</span>
-              <span className="text-[11px] font-mono text-ink">{p.elo ?? 1000}</span>
+              <span className="text-[11px] font-mono text-ink">{p.elo ?? '—'}</span>
+              <span className="text-[11px] font-mono text-ink">{p.playerNumber ?? '—'}</span>
             </div>
           ))}
         </div>

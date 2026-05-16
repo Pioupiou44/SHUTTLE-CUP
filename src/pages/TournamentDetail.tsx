@@ -4,7 +4,7 @@ import { useTournamentsStore } from '@/store/tournamentsStore'
 import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
 import { Button, Badge, Modal, Tag } from '@/components/ui'
-import { Play, ChevronLeft, Users, BarChart3, List, GitBranch, CheckCircle, Archive, Shuffle, Plus, X, Pencil, Radio, Printer, LayoutGrid, ExternalLink, RefreshCw } from 'lucide-react'
+import { Play, ChevronLeft, Users, BarChart3, List, GitBranch, CheckCircle, Archive, Shuffle, Plus, X, Pencil, Radio, Printer, LayoutGrid, ExternalLink, RefreshCw, Download } from 'lucide-react'
 import { playerDisplayName, CATEGORY_LABELS } from '@/types/domain'
 import { generateRoundRobin } from '@/engine/generators/roundRobin'
 import { generateSingleElim } from '@/engine/generators/singleElim'
@@ -1305,6 +1305,7 @@ function StandingsTab({
   players,
   allPlayerNames,
   tournamentFormat = 'round-robin',
+  tournamentName = 'tournoi',
 }: {
   tournamentPlayers: number[]
   matches: Match[]
@@ -1313,6 +1314,7 @@ function StandingsTab({
   players: ReturnType<typeof usePlayersStore.getState>['players']
   allPlayerNames: Map<number, string>
   tournamentFormat?: string
+  tournamentName?: string
 }) {
   const standings = useMemo(() => {
     if (matches.length === 0 || tournamentPlayers.length === 0) return []
@@ -1371,10 +1373,60 @@ function StandingsTab({
     )
   }
 
+  // ── Export CSV classement ────────────────────────────────────────────────
+  const handleExportStandings = () => {
+    let csvContent = ''
+    const slug = tournamentName.replace(/\s+/g, '-').toLowerCase()
+    const date = new Date().toISOString().slice(0, 10)
+
+    if (tournamentFormat === 'americano' && americanoStandings.length > 0) {
+      csvContent = ['Rang,Joueur,MJ,V,D,Pts cumulés',
+        ...americanoStandings.map((e, i) =>
+          `${i + 1},${e.playerName},${e.matchesPlayed},${e.wins},${e.losses},${e.totalPoints}`)
+      ].join('\n')
+    } else if (tournamentFormat === 'swiss' && swissStandings.length > 0) {
+      csvContent = ['Rang,Joueur,MJ,V,D,Pts Swiss,Buchholz',
+        ...swissStandings.map((e, i) =>
+          `${i + 1},${e.playerName},${e.matchesPlayed},${e.wins},${e.losses},${e.swissPoints},${e.buchholz}`)
+      ].join('\n')
+    } else if (tournamentFormat === 'king-of-court' && kingOfCourtStandings.length > 0) {
+      csvContent = ['Rang,Joueur,MJ,V T1,Total V,Pts',
+        ...kingOfCourtStandings.map((e, i) =>
+          `${i + 1},${e.playerName},${e.matchesPlayed},${e.winsOnCourt1},${e.totalWins},${e.totalPoints}`)
+      ].join('\n')
+    } else if (standings.length > 0) {
+      csvContent = ['Rang,Joueur,V,D,Sets G,Sets P,Pts',
+        ...standings.map((e, i) =>
+          `${i + 1},${e.playerName},${e.matchesWon},${e.matchesLost},${e.setsWon},${e.setsLost},${e.rankPoints}`)
+      ].join('\n')
+    }
+
+    if (!csvContent) return
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url
+    a.download = `classement-${slug}-${date}.csv`
+    a.click(); URL.revokeObjectURL(url)
+  }
+
+  const exportBtn = (
+    <div className="flex justify-end mb-1">
+      <button
+        onClick={handleExportStandings}
+        className="flex items-center gap-1.5 px-3 py-1.5 border-2 border-line bg-bg
+          hover:bg-bg-strong transition-colors font-mono font-bold text-[11px] uppercase tracking-[0.06em] text-ink"
+      >
+        <Download size={11} />
+        Export CSV
+      </button>
+    </div>
+  )
+
   // ── Américano : classement par points cumulés individuels ─────────────────
   if (tournamentFormat === 'americano' && americanoStandings.length > 0) {
     return (
       <div className="flex flex-col gap-6">
+        {exportBtn}
         <div className="flex flex-col border-2 border-line">
           <div className="grid grid-cols-[32px_1fr_60px_60px_60px_80px] bg-ink px-4 py-3">
             {['#', 'Joueur', 'MJ', 'V', 'D', 'Pts cumulés'].map((h) => (
@@ -1405,6 +1457,7 @@ function StandingsTab({
   if (tournamentFormat === 'swiss' && swissStandings.length > 0) {
     return (
       <div className="flex flex-col gap-6">
+        {exportBtn}
         <div className="flex flex-col border-2 border-line">
           <div className="grid grid-cols-[32px_1fr_60px_60px_60px_80px_80px] bg-ink px-4 py-3">
             {['#', 'Joueur', 'MJ', 'V', 'D', 'Pts Swiss', 'Buchholz'].map((h) => (
@@ -1436,6 +1489,7 @@ function StandingsTab({
   if (tournamentFormat === 'king-of-court' && kingOfCourtStandings.length > 0) {
     return (
       <div className="flex flex-col gap-6">
+        {exportBtn}
         <div className="flex flex-col border-2 border-line">
           <div className="grid grid-cols-[32px_1fr_60px_80px_80px_80px] bg-ink px-4 py-3">
             {['#', 'Joueur', 'MJ', 'V T1 👑', 'Total V', 'Pts'].map((h) => (
@@ -1466,6 +1520,7 @@ function StandingsTab({
 
   return (
     <div className="flex flex-col gap-6">
+      {exportBtn}
       {/* Classement individuel */}
       <div className="flex flex-col border-2 border-line">
         <div className="grid grid-cols-[32px_1fr_100px_64px_120px_60px_60px_70px_80px] bg-ink px-4 py-3">
@@ -2591,6 +2646,25 @@ export function TournamentDetail() {
     setConfirming(null)
   }
 
+  const handleExportResults = () => {
+    const slug = tournament.name.replace(/\s+/g, '-').toLowerCase()
+    const date = new Date().toISOString().slice(0, 10)
+    const rows: string[] = ['Round,Terrain,Catégorie,Équipe A,Équipe B,Score A,Score B,Statut']
+    for (const m of matches) {
+      const nameA = allPlayerNames.get(Number(m.teamA?.split(',')[0])) ?? m.teamA ?? '?'
+      const nameB = allPlayerNames.get(Number(m.teamB?.split(',')[0])) ?? m.teamB ?? '?'
+      const scores = allScores.get(m.id) ?? []
+      const totalA = scores.reduce((acc, s) => acc + (s.scoreA ?? 0), 0)
+      const totalB = scores.reduce((acc, s) => acc + (s.scoreB ?? 0), 0)
+      rows.push([m.round, m.courtNumber, m.category ?? '', nameA, nameB, totalA, totalB, m.status].join(','))
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url
+    a.download = `resultats-${slug}-${date}.csv`
+    a.click(); URL.revokeObjectURL(url)
+  }
+
   const handleArchive = async () => {
     await updateTournament(tournamentId, { status: 'archived' })
     setConfirming(null)
@@ -2787,10 +2861,16 @@ export function TournamentDetail() {
               </div>
             )}
             {(tournament.status === 'completed' || tournament.status === 'archived' || tournament.status === 'active') && confirming === null && (
-              <Button variant="secondary" size="sm" onClick={() => navigate(`/tournaments/${tournamentId}/print`)}>
-                <Printer size={13} className="mr-1 inline" />
-                Imprimer
-              </Button>
+              <>
+                <Button variant="secondary" size="sm" onClick={handleExportResults}>
+                  <Download size={13} className="mr-1 inline" />
+                  Export CSV
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => navigate(`/tournaments/${tournamentId}/print`)}>
+                  <Printer size={13} className="mr-1 inline" />
+                  Imprimer
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -2890,6 +2970,7 @@ export function TournamentDetail() {
                 players={players}
                 allPlayerNames={allPlayerNames}
                 tournamentFormat={tournament.format}
+                tournamentName={tournament.name}
               />
             )}
             {tab === 'pools' && (

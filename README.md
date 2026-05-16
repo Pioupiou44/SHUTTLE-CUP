@@ -583,7 +583,7 @@ export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 | **10 · Engine Swiss & King of Court** | ✅ | Générateurs + rondes dynamiques — désactivés dans le wizard (validation en cours) |
 | **11 · Distribution v1.0.1-beta** | ✅ | macOS (arm64 + x64 notarisés), Windows NSIS, Linux AppImage + deb |
 | **12 · Activation Swiss & KoC wizard** | ⏳ | Activer les formats dans le wizard après validation terrain |
-| **13 · Archives & export** | ⏳ | Export CSV joueurs/résultats, historique tournois archivés |
+| **13 · Archives & export** | ✅ | Export CSV joueurs (+ N° dossard, normalisation H→M), export classement + résultats matchs par tournoi |
 | **14 · Tests** | ⏳ | Vitest pour l'engine (générateurs, scoring, standings) |
 
 ---
