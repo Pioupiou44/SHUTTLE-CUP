@@ -90,8 +90,8 @@ const FORMAT_OPTIONS: { value: TournamentFormat; label: string; disabled?: boole
   { value: 'knockout',           label: 'Élimination directe' },
   { value: 'double-elimination', label: 'Double élimination' },
   { value: 'americano',          label: 'Américano' },
-  { value: 'swiss',              label: 'Système suisse',  disabled: true },
-  { value: 'king-of-court',      label: 'Roi du court',    disabled: true },
+  { value: 'swiss',              label: 'Système suisse' },
+  { value: 'king-of-court',      label: 'Roi du court' },
 ]
 
 const BASE_STEPS = [
@@ -204,6 +204,27 @@ function TournamentPreview({ data, selectedPlayers, selectedRule }: {
       }
     }
 
+    if (data.format === 'swiss') {
+      const roundsEstimate = Math.ceil(Math.log2(n)) + 1
+      const matchesPerRound = Math.floor(n / 2)
+      const total = matchesPerRound * roundsEstimate
+      const dur = Math.ceil(matchesPerRound / courts) * 20 * roundsEstimate
+      return {
+        headline: `Système suisse · ~${roundsEstimate} rondes`,
+        detail: `→ ~${matchesPerRound} matchs/ronde · ~${total} matchs total`,
+        duration: `${fmtDuration(dur)} sur ${courts} terrain${courts > 1 ? 's' : ''}`,
+      }
+    }
+
+    if (data.format === 'king-of-court') {
+      const activeCourts = Math.min(courts, Math.floor(n / 2))
+      return {
+        headline: `Roi du court · ${activeCourts} terrain${activeCourts > 1 ? 's' : ''} actif${activeCourts > 1 ? 's' : ''}`,
+        detail: `→ ${activeCourts} match${activeCourts > 1 ? 's' : ''} par ronde`,
+        duration: `~20 min par ronde`,
+      }
+    }
+
     const total = Math.ceil(n / 2) * 3
     const dur = Math.ceil(total / courts) * 20
     return {
@@ -230,6 +251,14 @@ function TournamentPreview({ data, selectedPlayers, selectedRule }: {
 
   if (data.format === 'americano' && n < 4) {
     warnings.push(`Minimum 4 joueurs requis pour l'américano (actuellement ${n}).`)
+  }
+
+  if (data.format === 'swiss' && n < 4) {
+    warnings.push(`Minimum 4 joueurs requis pour le système suisse (actuellement ${n}).`)
+  }
+
+  if (data.format === 'king-of-court' && n < 4) {
+    warnings.push(`Minimum 4 joueurs requis pour le Roi du court (au moins 2 terrains × 2 joueurs, actuellement ${n}).`)
   }
 
   if (data.format === 'pool+knockout' && n < data.poolCount * 3) {
@@ -1846,8 +1875,10 @@ export function TournamentWizard() {
     if (step === 3) return true  // Équipes — toggle optionnel
     if (step === 4) {            // Format — vérifie compatibilité avec le nb de joueurs
       const n = data.selectedPlayerIds.length
-      if (data.format === 'round-robin' && n < 3) return false
-      if (data.format === 'americano'   && n < 4) return false
+      if (data.format === 'round-robin'   && n < 3) return false
+      if (data.format === 'americano'     && n < 4) return false
+      if (data.format === 'swiss'         && n < 4) return false
+      if (data.format === 'king-of-court' && n < 4) return false
       if (data.format === 'pool+knockout' && n < data.poolCount * 3) return false
       return true
     }
