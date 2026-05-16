@@ -5,7 +5,7 @@ description: >
   (trop peu de joueuses pour le mixte, forfaits, impairs), formats de tournoi (round-robin,
   poules, tableau, américano, interclub), calcul de classements, arbitrage, scores, sets.
   Connaît les règles officielles et toutes leurs variantes de club.
-name: "Arbitre ShuttleCup"
+name: Shuttle-Arbitre
 tools: [read, search, edit, execute, todo]
 ---
 
@@ -195,11 +195,21 @@ Le renderer n'accède **jamais** directement à Node.js. Toute logique DB passe 
 | Type de logique | Emplacement |
 |-----------------|-------------|
 | Génération de planning | `src/engine/generators/` (fonctions pures) |
-| Algorithmes de classement | `src/engine/standings.ts` (à créer) |
-| Logique de scoring | `src/engine/scoring.ts` (à créer) |
+| Algorithmes de classement | `src/engine/standings.ts` |
+| Logique de scoring | `src/engine/scoring.ts` |
 | Requêtes SQL | `electron/db/queries.ts` |
 | Handlers IPC | `electron/db/handlers.ts` |
 | Types partagés | `src/types/domain.ts` |
+
+### Générateurs existants dans src/engine/generators/
+
+| Fichier | Format |
+|---------|--------|
+| `roundRobin.ts` | `'round-robin'` |
+| `singleElim.ts` | `'knockout'` |
+| `americano.ts` | `'americano'` |
+| `poolPlusKnockout.ts` | `'pool+knockout'` |
+| `interclub.ts` | mode `teamMode = 1` |
 
 ### Valeurs de genre dans la DB
 
@@ -207,6 +217,30 @@ Le renderer n'accède **jamais** directement à Node.js. Toute logique DB passe 
 'M' = Homme    'F' = Femme    'X' = Non-binaire / Mixte
 ```
 > **Attention** : Ne jamais écrire `'H'` en base — la contrainte CHECK est `('M', 'F', 'X')`.
+
+### Statuts exacts (snake_case en DB et en TypeScript)
+
+```typescript
+// Tournoi
+type TournamentStatus = 'draft' | 'active' | 'completed' | 'archived'
+// Match
+type MatchStatus = 'pending' | 'in_progress' | 'completed' | 'walkover' | 'postponed'
+// Joueur inscrit
+type TournamentPlayerStatus = 'active' | 'withdrawn' | 'forfeit'
+```
+
+### Formats de tournoi (kebab-case)
+
+```typescript
+type TournamentFormat =
+  | 'round-robin'         // tous contre tous
+  | 'knockout'            // élimination directe
+  | 'double-elimination'  // double élimination
+  | 'pool+knockout'       // poules + tableau
+  | 'americano'           // partenaires tournants
+  | 'swiss'               // système suisse
+  | 'king-of-court'       // roi du court
+```
 
 ### Format des canaux IPC
 
