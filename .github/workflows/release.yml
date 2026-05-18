@@ -28,9 +28,10 @@ jobs:
         env:
           # GITHUB_TOKEN est fourni automatiquement par GitHub Actions
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signature + notarisation Apple (secrets optionnels du repo)
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Pas de signature locale sur CI — les DMGs signés/notarisés sont
+          # uploadés manuellement depuis la machine de développement
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Notarisation Apple (secrets optionnels du repo)
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
