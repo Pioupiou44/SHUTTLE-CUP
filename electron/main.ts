@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
+import { autoUpdater } from 'electron-updater'
 import { initDb } from './db/queries'
 import { registerDbHandlers } from './db/handlers'
 
@@ -64,6 +65,33 @@ app.whenReady().then(() => {
   }
 
   createWindow()
+
+  // ── Mise à jour automatique (prod uniquement) ──────────────────────────────
+  if (!isDev) {
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+
+    autoUpdater.on('update-available', (info) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send('update:available', info.version)
+    })
+
+    autoUpdater.on('update-downloaded', (info) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send('update:downloaded', info.version)
+    })
+
+    autoUpdater.on('error', (err) => {
+      // Silencieux en prod — pas de popup d'erreur gênant
+      console.error('[auto-update]', err.message)
+    })
+
+    // Vérifie 5s après le démarrage (laisse le temps à la fenêtre de s'afficher)
+    setTimeout(() => { void autoUpdater.checkForUpdates() }, 5000)
+  }
+
+  // Installe la mise à jour quand l'utilisateur clique sur "Redémarrer"
+  ipcMain.handle('update:install', () => {
+    autoUpdater.quitAndInstall()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

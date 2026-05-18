@@ -68,4 +68,16 @@ const dbApi = {
   openNewWindow: (hash: string) => ipcRenderer.invoke('open-new-window', hash),
 }
 
+// ── API mise à jour automatique ───────────────────────────────────────────────
+const updateApi = {
+  onUpdateAvailable: (cb: (version: string) => void) => {
+    ipcRenderer.on('update:available', (_e, version: string) => cb(version))
+  },
+  onUpdateDownloaded: (cb: (version: string) => void) => {
+    ipcRenderer.on('update:downloaded', (_e, version: string) => cb(version))
+  },
+  install: () => ipcRenderer.invoke('update:install'),
+}
+
 contextBridge.exposeInMainWorld('db', dbApi)
+contextBridge.exposeInMainWorld('updater', updateApi)
