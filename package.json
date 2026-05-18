@@ -1,6 +1,6 @@
 {
   "name": "shuttlecup",
-  "version": "1.0.1-beta",
+  "version": "1.0.1",
   "private": true,
   "description": "Gestionnaire de tournois de badminton pour clubs",
   "main": "dist-electron/main.js",
