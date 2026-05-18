@@ -83,20 +83,15 @@ module.exports = {
     shortcutName: 'ShuttleCup',
   },
 
-  // ─── Linux — AppImage + .deb x64 ───────────────────────────────────────────
+  // ─── Linux — AppImage x64 (le .deb nécessite dpkg/fakeroot, non dispo sur macOS) ─
   linux: {
     target: [
       { target: 'AppImage', arch: ['x64'] },
-      { target: 'deb',      arch: ['x64'] },
     ],
     icon: 'assets/icons',
     category: 'Sports',
     maintainer: 'Alexis Priou <contact@alexisandcom.fr>',
     description: 'Gestionnaire de tournois de badminton pour clubs',
-  },
-
-  deb: {
-    depends: ['libgtk-3-0', 'libnotify4', 'libnss3', 'libxss1', 'libxtst6', 'xdg-utils'],
   },
 
   // ─── Hook afterSign : notarise l'app macOS si les variables sont définies ──
