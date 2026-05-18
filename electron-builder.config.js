@@ -104,12 +104,4 @@ module.exports = {
 
   // Compression maximale pour la distribution
   compression: 'maximum',
-
-  // ─── Publication GitHub Releases — utilisé par electron-updater ────────────
-  publish: {
-    provider: 'github',
-    owner: 'Pioupiou24',
-    repo: 'SHUTTLE-CUP',
-    releaseType: 'release',
-  },
 }

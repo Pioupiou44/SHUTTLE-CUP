@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense } from 'react'
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { Topbar } from './components/Topbar'
 import { Ticker } from './components/Ticker'
@@ -18,45 +18,10 @@ const DevUI = lazy(() => import('./pages/DevUI').then((m) => ({ default: m.DevUI
 const isStandalone = window.location.hash.includes('standalone=1')
 
 export function App() {
-  const [updateState, setUpdateState] = useState<'idle' | 'available' | 'ready'>('idle')
-  const [updateVersion, setUpdateVersion] = useState<string>('')
-
-  useEffect(() => {
-    if (!window.updater) return
-    window.updater.onUpdateAvailable((version) => {
-      setUpdateVersion(version)
-      setUpdateState('available')
-    })
-    window.updater.onUpdateDownloaded((version) => {
-      setUpdateVersion(version)
-      setUpdateState('ready')
-    })
-  }, [])
-
   return (
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="flex flex-col w-full h-full">
         {!isStandalone && <Topbar />}
-        {/* Bannière de mise à jour — visible uniquement en prod quand une MAJ est disponible */}
-        {updateState !== 'idle' && !isStandalone && (
-          <div className="flex items-center justify-between gap-4 px-5 py-2 bg-ink text-green-fluo
-            font-sans text-[12px] font-bold tracking-[0.04em] uppercase shrink-0">
-            <span>
-              {updateState === 'available'
-                ? `Mise à jour ${updateVersion} — téléchargement en cours…`
-                : `Mise à jour ${updateVersion} prête — redémarrer pour l'installer`}
-            </span>
-            {updateState === 'ready' && (
-              <button
-                onClick={() => { void window.updater.install() }}
-                className="px-3 py-1 bg-green-fluo text-ink font-black text-[11px] uppercase
-                  tracking-[0.06em] hover:opacity-80 transition-opacity"
-              >
-                Redémarrer
-              </button>
-            )}
-          </div>
-        )}
         <main className="flex-1 overflow-y-auto scrollbar-light bg-bg flex flex-col">
           <Routes>
             <Route path="/" element={<Dashboard />} />

@@ -68,10 +68,5 @@ export interface DbApi {
 declare global {
   interface Window {
     db: DbApi
-    updater: {
-      onUpdateAvailable: (cb: (version: string) => void) => void
-      onUpdateDownloaded: (cb: (version: string) => void) => void
-      install: () => Promise<void>
-    }
   }
 }
