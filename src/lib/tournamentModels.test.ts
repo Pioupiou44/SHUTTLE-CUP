@@ -22,6 +22,16 @@ describe('tournamentModels helpers', () => {
     expect(result).toBeUndefined()
   })
 
+  it('respecte l ordre des noms preferes quand plusieurs regles existent', () => {
+    const rules: Pick<ScoringRule, 'id' | 'name'>[] = [
+      { id: 1, name: 'BWF Standard 3×21' },
+      { id: 2, name: 'BWF 3×15 (à partir de 2027)' },
+    ]
+
+    const result = resolveRuleByNames(rules, ['BWF 3×15 (à partir de 2027)', 'BWF Standard 3×21'])
+    expect(result?.id).toBe(2)
+  })
+
   it('considere un modele conforme quand format, poules et categories matchent', () => {
     const model = TOURNAMENT_MODELS.find((m) => m.id === 'officiel-bwf')
     expect(model).toBeDefined()

@@ -91,6 +91,10 @@ export function resolveRuleByNames(
   rules: Pick<ScoringRule, 'id' | 'name'>[],
   preferredNames: string[]
 ): Pick<ScoringRule, 'id' | 'name'> | undefined {
-  const wanted = preferredNames.map(normalizeName)
-  return rules.find((rule) => wanted.includes(normalizeName(rule.name)))
+  const byName = new Map(rules.map((rule) => [normalizeName(rule.name), rule]))
+  for (const preferredName of preferredNames) {
+    const match = byName.get(normalizeName(preferredName))
+    if (match) return match
+  }
+  return undefined
 }
