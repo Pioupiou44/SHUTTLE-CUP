@@ -6,4 +6,5 @@ release/
 *.db-shm
 *.db-wal
 .DS_Store
+._*
 Thumbs.db
