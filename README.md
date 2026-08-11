@@ -2,7 +2,7 @@
 
 Application de bureau pour la gestion complète de tournois de badminton en club.
 
-**Stack** : Electron 30 · React 18 · TypeScript strict · Vite 5 · Zustand · better-sqlite3 · Tailwind CSS · `v1.0.1-beta`
+**Stack** : Electron 30 · React 18 · TypeScript strict · Vite 5 · Zustand · better-sqlite3 · Tailwind CSS · `v1.0.2`
 
 🌐 **Site officiel** : [shuttle.cup.alexisandcom.fr](https://shuttle.cup.alexisandcom.fr)
 
@@ -580,10 +580,10 @@ export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 | **9 · Impression** | ✅ | Vue `/print` : planning, classements, résultats avec logo et pied de page |
 | **Sécurité IPC** | ✅ | Validation entrées IPC (IDs, enum statuts, scores), guard prod (`clearAllData` dev-only), hash fenêtre sanitisé |
 | **10 · Engine Swiss & King of Court** | ✅ | Générateurs + rondes dynamiques (bouton "Ronde N ▶" dans l'onglet Planning) |
-| **11 · Distribution v1.0.1-beta** | ✅ | macOS (arm64 + x64 notarisés), Windows NSIS, Linux AppImage + deb |
+| **11 · Distribution v1.0.2** | ✅ | macOS (arm64 + x64), Windows NSIS, Linux AppImage + deb |
 | **12 · Activation Swiss & KoC wizard** | ✅ | Swiss & King of Court activés dans le wizard — étapes, preview, validation min. 4 joueurs |
 | **13 · Archives & export** | ✅ | Export CSV joueurs (+ N° dossard, normalisation H→M), export classement + résultats matchs par tournoi |
-| **14 · Tests** | ✅ | Vitest — 171 tests (scoring, standings, roundRobin, Swiss, américano, KoC, singleElim, poolPlusKnockout) — `npm run test` |
+| **14 · Tests** | ✅ | Vitest — 176 tests (scoring, standings, roundRobin, Swiss, américano, KoC, singleElim, poolPlusKnockout) — `npm run test` |
 | **15 · Sauvegarde JSON** | ✅ | Export/import d'un tournoi complet (joueurs, matchs, scores) en `.json` — bouton « Sauvegarder » + « Restaurer » |
 
 ---
