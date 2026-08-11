@@ -6,10 +6,12 @@ import { useRulesStore } from '@/store/rulesStore'
 import { Button, Input, Tag, Badge } from '@/components/ui'
 import { ChevronRight, ChevronLeft, Users, Trophy, Settings, AlignLeft, Shield, ChevronUp, ChevronDown, ChevronsUpDown, Shuffle, Plus, X, Layers2, LayoutGrid } from 'lucide-react'
 import { playerDisplayName, FORMAT_LABELS, CATEGORY_LABELS } from '@/types/domain'
+import { TOURNAMENT_MODELS, modelStillMatchesConfig, resolveRuleByNames } from '@/lib/tournamentModels'
 import { countRoundRobinMatches } from '@/engine/generators/roundRobin'
 import { splitIntoPools } from '@/engine/generators/poolPlusKnockout'
 import { nextPowerOf2 } from '@/engine/generators/singleElim'
 import type { TournamentFormat, MatchCategory, Player, ScoringRule } from '@/types/domain'
+import type { TournamentModelDef } from '@/lib/tournamentModels'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,83 +95,6 @@ const FORMAT_OPTIONS: { value: TournamentFormat; label: string; disabled?: boole
   { value: 'swiss',              label: 'Système suisse' },
   { value: 'king-of-court',      label: 'Roi du court' },
 ]
-
-type TournamentModelDef = {
-  id: string
-  label: string
-  description: string
-  format: TournamentFormat
-  categories: MatchCategory[]
-  poolCount: number
-  scoringRuleNames: string[]
-  minPlayers: number
-  maxPlayers: number
-  recommendedCourts: number
-}
-
-const TOURNAMENT_MODELS: TournamentModelDef[] = [
-  {
-    id: 'club-rapide',
-    label: 'Tournoi club rapide',
-    description: 'Format court pour soirée club : rounds fluides et score 2×15.',
-    format: 'round-robin',
-    categories: ['SH', 'SD'],
-    poolCount: 2,
-    scoringRuleNames: ['Format club 2×15 (rapide)', 'BWF 3×15 (à partir de 2027)'],
-    minPlayers: 6,
-    maxPlayers: 12,
-    recommendedCourts: 2,
-  },
-  {
-    id: 'officiel-bwf',
-    label: 'Championnat officiel',
-    description: 'Structure poules + finale avec règle BWF officielle.',
-    format: 'pool+knockout',
-    categories: ['SH', 'SD', 'DH', 'DD', 'DX'],
-    poolCount: 2,
-    scoringRuleNames: ['BWF 3×15 (à partir de 2027)', 'BWF Standard 3×21'],
-    minPlayers: 12,
-    maxPlayers: 32,
-    recommendedCourts: 4,
-  },
-  {
-    id: 'poules-finale',
-    label: 'Poules + finale club',
-    description: 'Chaque joueur joue plusieurs matchs avant la phase finale.',
-    format: 'pool+knockout',
-    categories: ['SH', 'SD', 'DH'],
-    poolCount: 2,
-    scoringRuleNames: ['BWF Standard 3×21', 'Set unique 21 points'],
-    minPlayers: 10,
-    maxPlayers: 24,
-    recommendedCourts: 3,
-  },
-  {
-    id: 'open-mixte',
-    label: 'Format simple / double / mixte',
-    description: 'Modèle polyvalent pour tournoi multi-disciplines.',
-    format: 'americano',
-    categories: ['DH', 'DD', 'DX'],
-    poolCount: 2,
-    scoringRuleNames: ['Set unique 15 points', 'Set unique 21 points'],
-    minPlayers: 8,
-    maxPlayers: 24,
-    recommendedCourts: 3,
-  },
-]
-
-function areSameCategories(a: MatchCategory[], b: MatchCategory[]): boolean {
-  if (a.length !== b.length) return false
-  const sa = [...a].sort()
-  const sb = [...b].sort()
-  return sa.every((v, i) => v === sb[i])
-}
-
-function modelStillMatchesData(data: WizardData, model: TournamentModelDef): boolean {
-  return data.format === model.format
-    && data.poolCount === model.poolCount
-    && areSameCategories(data.categories, model.categories)
-}
 
 const BASE_STEPS = [
   { id: 1, label: 'Infos',       icon: AlignLeft },
@@ -2012,19 +1937,13 @@ export function TournamentWizard() {
     if (!selectedModelId) return
     const model = TOURNAMENT_MODELS.find((m) => m.id === selectedModelId)
     if (!model) return
-    if (!modelStillMatchesData(data, model)) setSelectedModelId(null)
+    if (!modelStillMatchesConfig(data, model)) setSelectedModelId(null)
   }, [selectedModelId, data])
-
-  const findRuleByNames = (ruleNames: string[]): ScoringRule | undefined => {
-    const normalize = (v: string) => v.toLowerCase().replace(/\s+/g, ' ').trim()
-    const wanted = ruleNames.map(normalize)
-    return rules.find((rule) => wanted.includes(normalize(rule.name)))
-  }
 
   const applyModel = (modelId: string) => {
     const model = TOURNAMENT_MODELS.find((m) => m.id === modelId)
     if (!model) return
-    const matchedRule = findRuleByNames(model.scoringRuleNames)
+    const matchedRule = resolveRuleByNames(rules, model.scoringRuleNames)
     setData((prev) => ({
       ...prev,
       format: model.format,
