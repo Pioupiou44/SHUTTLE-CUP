@@ -92,7 +92,7 @@ export function Topbar() {
         </a>
         <div className="flex items-center px-4 border-l-2 border-line h-full gap-3">
           <span className="font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-ink-3 select-none">
-            BETA 1.0.1
+            BETA 1.0.2
           </span>
           <span className="font-mono font-bold text-[12px] text-ink-2 tracking-[0.05em]">
             {time}

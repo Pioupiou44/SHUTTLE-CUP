@@ -12,6 +12,8 @@ module.exports = {
   files: [
     'dist/**',
     'dist-electron/**',
+    '!**/._*',
+    '!**/.DS_Store',
   ],
 
   // Décompresser les modules natifs — obligatoire pour better-sqlite3
