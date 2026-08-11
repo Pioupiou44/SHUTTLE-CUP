@@ -102,6 +102,9 @@ type TournamentModelDef = {
   categories: MatchCategory[]
   poolCount: number
   scoringRuleNames: string[]
+  minPlayers: number
+  maxPlayers: number
+  recommendedCourts: number
 }
 
 const TOURNAMENT_MODELS: TournamentModelDef[] = [
@@ -113,6 +116,9 @@ const TOURNAMENT_MODELS: TournamentModelDef[] = [
     categories: ['SH', 'SD'],
     poolCount: 2,
     scoringRuleNames: ['Format club 2×15 (rapide)', 'BWF 3×15 (à partir de 2027)'],
+    minPlayers: 6,
+    maxPlayers: 12,
+    recommendedCourts: 2,
   },
   {
     id: 'officiel-bwf',
@@ -122,6 +128,9 @@ const TOURNAMENT_MODELS: TournamentModelDef[] = [
     categories: ['SH', 'SD', 'DH', 'DD', 'DX'],
     poolCount: 2,
     scoringRuleNames: ['BWF 3×15 (à partir de 2027)', 'BWF Standard 3×21'],
+    minPlayers: 12,
+    maxPlayers: 32,
+    recommendedCourts: 4,
   },
   {
     id: 'poules-finale',
@@ -131,6 +140,9 @@ const TOURNAMENT_MODELS: TournamentModelDef[] = [
     categories: ['SH', 'SD', 'DH'],
     poolCount: 2,
     scoringRuleNames: ['BWF Standard 3×21', 'Set unique 21 points'],
+    minPlayers: 10,
+    maxPlayers: 24,
+    recommendedCourts: 3,
   },
   {
     id: 'open-mixte',
@@ -140,8 +152,24 @@ const TOURNAMENT_MODELS: TournamentModelDef[] = [
     categories: ['DH', 'DD', 'DX'],
     poolCount: 2,
     scoringRuleNames: ['Set unique 15 points', 'Set unique 21 points'],
+    minPlayers: 8,
+    maxPlayers: 24,
+    recommendedCourts: 3,
   },
 ]
+
+function areSameCategories(a: MatchCategory[], b: MatchCategory[]): boolean {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((v, i) => v === sb[i])
+}
+
+function modelStillMatchesData(data: WizardData, model: TournamentModelDef): boolean {
+  return data.format === model.format
+    && data.poolCount === model.poolCount
+    && areSameCategories(data.categories, model.categories)
+}
 
 const BASE_STEPS = [
   { id: 1, label: 'Infos',       icon: AlignLeft },
@@ -177,10 +205,11 @@ function fmtDuration(minutes: number): string {
   return m === 0 ? `~${h}h` : `~${h}h${String(m).padStart(2, '0')}`
 }
 
-function TournamentPreview({ data, selectedPlayers, selectedRule }: {
+function TournamentPreview({ data, selectedPlayers, selectedRule, selectedModel }: {
   data: WizardData
   selectedPlayers: Player[]
   selectedRule: ScoringRule | undefined
+  selectedModel: TournamentModelDef | null
 }) {
   const n = selectedPlayers.length
   const courts = data.courtCount
@@ -341,6 +370,18 @@ function TournamentPreview({ data, selectedPlayers, selectedRule }: {
     warnings.push('Aucune règle de scoring sélectionnée.')
   }
 
+  if (selectedModel) {
+    if (n < selectedModel.minPlayers) {
+      warnings.push(`${selectedModel.label} : recommandé à partir de ${selectedModel.minPlayers} joueurs (actuellement ${n}).`)
+    }
+    if (n > selectedModel.maxPlayers) {
+      warnings.push(`${selectedModel.label} : recommandé jusqu'à ${selectedModel.maxPlayers} joueurs (actuellement ${n}).`)
+    }
+    if (courts < selectedModel.recommendedCourts) {
+      warnings.push(`${selectedModel.label} : conseillé avec ${selectedModel.recommendedCourts} terrains minimum (actuellement ${courts}).`)
+    }
+  }
+
   const sim = simulate()
 
   return (
@@ -456,6 +497,10 @@ function Step1({
   onApplyModel: (modelId: string) => void
   selectedModelId: string | null
 }) {
+  const selectedModel = selectedModelId
+    ? TOURNAMENT_MODELS.find((m) => m.id === selectedModelId) ?? null
+    : null
+
   return (
     <div className="flex flex-col gap-5">
       <Input label="Nom du tournoi *" placeholder="Ex : Championnat interne printemps 2026"
@@ -514,6 +559,16 @@ function Step1({
             )
           })}
         </div>
+        {selectedModel && (
+          <div className="mt-2 border-2 border-line-soft bg-bg-alt px-3 py-2">
+            <p className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-ink-3">
+              Modèle actif : {selectedModel.label}
+            </p>
+            <p className="font-sans text-[12px] text-ink-2 mt-1">
+              Recommandé : {selectedModel.minPlayers}-{selectedModel.maxPlayers} joueurs · {selectedModel.recommendedCourts}+ terrains
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1953,6 +2008,13 @@ export function TournamentWizard() {
     }
   }, [rules])
 
+  useEffect(() => {
+    if (!selectedModelId) return
+    const model = TOURNAMENT_MODELS.find((m) => m.id === selectedModelId)
+    if (!model) return
+    if (!modelStillMatchesData(data, model)) setSelectedModelId(null)
+  }, [selectedModelId, data])
+
   const findRuleByNames = (ruleNames: string[]): ScoringRule | undefined => {
     const normalize = (v: string) => v.toLowerCase().replace(/\s+/g, ' ').trim()
     const wanted = ruleNames.map(normalize)
@@ -2048,6 +2110,9 @@ export function TournamentWizard() {
 
   const selectedPlayers = players.filter((p) => data.selectedPlayerIds.includes(p.id))
   const selectedRule = rules.find((r) => r.id === data.scoringRuleId)
+  const selectedModel = selectedModelId
+    ? TOURNAMENT_MODELS.find((m) => m.id === selectedModelId) ?? null
+    : null
 
   return (
     <div className="flex h-full">
@@ -2133,7 +2198,12 @@ export function TournamentWizard() {
 
       {/* Zone droite 40% — aperçu */}
       <div className="flex-[2] bg-bg-alt sticky top-0 h-full overflow-y-auto scrollbar-light">
-        <TournamentPreview data={data} selectedPlayers={selectedPlayers} selectedRule={selectedRule} />
+        <TournamentPreview
+          data={data}
+          selectedPlayers={selectedPlayers}
+          selectedRule={selectedRule}
+          selectedModel={selectedModel}
+        />
       </div>
     </div>
   )
