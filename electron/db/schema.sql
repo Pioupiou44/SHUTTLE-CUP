@@ -91,6 +91,8 @@ INSERT OR IGNORE INTO scoring_rules (name, setsToWin, pointsPerSet, hasDeuce, ma
 VALUES
   ('BWF Standard 3×21', 2, 21, 1, 30, 0, 0),
   ('BWF 3×15 (à partir de 2027)', 2, 15, 1, 21, 1, 0),
+  ('Format club 2×15 (rapide)', 2, 15, 1, 21, 1, 0),
   ('Set unique 21 points', 1, 21, 1, 30, 0, 0),
+  ('Set unique 15 points', 1, 15, 1, 21, 1, 0),
   ('3×15 classique', 2, 15, 0, 15, 1, 0),
   ('5×11 (expérimental)', 3, 11, 1, 15, 0, 0);

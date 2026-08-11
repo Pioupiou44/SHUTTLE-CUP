@@ -94,6 +94,55 @@ const FORMAT_OPTIONS: { value: TournamentFormat; label: string; disabled?: boole
   { value: 'king-of-court',      label: 'Roi du court' },
 ]
 
+type TournamentModelDef = {
+  id: string
+  label: string
+  description: string
+  format: TournamentFormat
+  categories: MatchCategory[]
+  poolCount: number
+  scoringRuleNames: string[]
+}
+
+const TOURNAMENT_MODELS: TournamentModelDef[] = [
+  {
+    id: 'club-rapide',
+    label: 'Tournoi club rapide',
+    description: 'Format court pour soirée club : rounds fluides et score 2×15.',
+    format: 'round-robin',
+    categories: ['SH', 'SD'],
+    poolCount: 2,
+    scoringRuleNames: ['Format club 2×15 (rapide)', 'BWF 3×15 (à partir de 2027)'],
+  },
+  {
+    id: 'officiel-bwf',
+    label: 'Championnat officiel',
+    description: 'Structure poules + finale avec règle BWF officielle.',
+    format: 'pool+knockout',
+    categories: ['SH', 'SD', 'DH', 'DD', 'DX'],
+    poolCount: 2,
+    scoringRuleNames: ['BWF 3×15 (à partir de 2027)', 'BWF Standard 3×21'],
+  },
+  {
+    id: 'poules-finale',
+    label: 'Poules + finale club',
+    description: 'Chaque joueur joue plusieurs matchs avant la phase finale.',
+    format: 'pool+knockout',
+    categories: ['SH', 'SD', 'DH'],
+    poolCount: 2,
+    scoringRuleNames: ['BWF Standard 3×21', 'Set unique 21 points'],
+  },
+  {
+    id: 'open-mixte',
+    label: 'Format simple / double / mixte',
+    description: 'Modèle polyvalent pour tournoi multi-disciplines.',
+    format: 'americano',
+    categories: ['DH', 'DD', 'DX'],
+    poolCount: 2,
+    scoringRuleNames: ['Set unique 15 points', 'Set unique 21 points'],
+  },
+]
+
 const BASE_STEPS = [
   { id: 1, label: 'Infos',       icon: AlignLeft },
   { id: 2, label: 'Joueurs',     icon: Users },
@@ -396,7 +445,17 @@ function TournamentPreview({ data, selectedPlayers, selectedRule }: {
 
 // ─── Étapes ───────────────────────────────────────────────────────────────────
 
-function Step1({ data, onChange }: { data: WizardData; onChange: (d: Partial<WizardData>) => void }) {
+function Step1({
+  data,
+  onChange,
+  onApplyModel,
+  selectedModelId,
+}: {
+  data: WizardData
+  onChange: (d: Partial<WizardData>) => void
+  onApplyModel: (modelId: string) => void
+  selectedModelId: string | null
+}) {
   return (
     <div className="flex flex-col gap-5">
       <Input label="Nom du tournoi *" placeholder="Ex : Championnat interne printemps 2026"
@@ -429,6 +488,32 @@ function Step1({ data, onChange }: { data: WizardData; onChange: (d: Partial<Wiz
         <p className="font-sans text-[12px] text-ink-3 mt-2">
           {data.courtCount} terrain{data.courtCount !== 1 ? 's' : ''} actif{data.courtCount !== 1 ? 's' : ''}
         </p>
+      </div>
+
+      <div>
+        <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
+          Modèles de tournoi
+          <span className="font-normal normal-case ml-2 text-ink-3">(optionnel)</span>
+        </p>
+        <div className="grid grid-cols-1 gap-2">
+          {TOURNAMENT_MODELS.map((model) => {
+            const selected = selectedModelId === model.id
+            return (
+              <button
+                key={model.id}
+                onClick={() => onApplyModel(model.id)}
+                className={`text-left px-4 py-3 border-2 transition-colors
+                  ${selected ? 'border-blue bg-blue/5' : 'border-line hover:border-blue/50 bg-bg'}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-sans font-bold text-[13px] text-ink">{model.label}</span>
+                  {selected && <Badge variant="active">Appliqué</Badge>}
+                </div>
+                <p className="font-sans text-[12px] text-ink-3 mt-0.5">{model.description}</p>
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -1837,6 +1922,7 @@ export function TournamentWizard() {
   const [step, setStep] = useState(1)
   const [data, setData] = useState<WizardData>(INITIAL)
   const [saving, setSaving] = useState(false)
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
 
   // Step 6 (Poules) uniquement en mode pool+knockout hors mode équipes
   // Step 7 (Composition) visible uniquement si des catégories doubles sont sélectionnées
@@ -1866,6 +1952,26 @@ export function TournamentWizard() {
       setData((d) => ({ ...d, scoringRuleId: rules[0].id }))
     }
   }, [rules])
+
+  const findRuleByNames = (ruleNames: string[]): ScoringRule | undefined => {
+    const normalize = (v: string) => v.toLowerCase().replace(/\s+/g, ' ').trim()
+    const wanted = ruleNames.map(normalize)
+    return rules.find((rule) => wanted.includes(normalize(rule.name)))
+  }
+
+  const applyModel = (modelId: string) => {
+    const model = TOURNAMENT_MODELS.find((m) => m.id === modelId)
+    if (!model) return
+    const matchedRule = findRuleByNames(model.scoringRuleNames)
+    setData((prev) => ({
+      ...prev,
+      format: model.format,
+      categories: model.categories,
+      poolCount: model.poolCount,
+      scoringRuleId: matchedRule ? matchedRule.id : prev.scoringRuleId,
+    }))
+    setSelectedModelId(model.id)
+  }
 
   const update = (partial: Partial<WizardData>) => setData((d) => ({ ...d, ...partial }))
 
@@ -1984,7 +2090,14 @@ export function TournamentWizard() {
 
         {/* Contenu étape */}
         <div className={step === 6 || step === 7 ? '' : 'max-w-xl'}>
-          {step === 1 && <Step1 data={data} onChange={update} />}
+          {step === 1 && (
+            <Step1
+              data={data}
+              onChange={update}
+              onApplyModel={applyModel}
+              selectedModelId={selectedModelId}
+            />
+          )}
           {step === 2 && <Step2 data={data} players={players} onChange={update} />}
           {step === 3 && <Step3Teams data={data} players={players} onChange={update} />}
           {step === 4 && <Step3 data={data} onChange={update} />}
