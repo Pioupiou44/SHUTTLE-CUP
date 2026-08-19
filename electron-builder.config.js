@@ -75,6 +75,10 @@ module.exports = {
     // Pas de signature : laisser ces propriétés absentes
   },
 
+  appx: {
+    publisherDisplayName: 'Alexis &amp; Com',
+  },
+
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
