@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { usePlayersStore } from '@/store/playersStore'
 import { Button, Modal, Input, Select, Tag } from '@/components/ui'
 import { Pencil, Trash2, Plus, Search, Upload, Download, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react'
@@ -187,6 +187,51 @@ function StatBlock({ label, value }: { label: string; value: number | string }) 
 // ─── Page principale ──────────────────────────────────────────────────────────
 
 type SortKey = 'playerNumber' | 'lastName' | 'firstName' | 'pseudo' | 'gender' | 'level' | 'club' | 'tournamentCount' | 'elo'
+type PlayerColumnKey = SortKey
+
+const PLAYER_COLUMNS: { label: string; key: PlayerColumnKey; sortKey: SortKey | null }[] = [
+  { label: 'N° Doss.', key: 'playerNumber', sortKey: 'playerNumber' },
+  { label: 'Nom', key: 'lastName', sortKey: 'lastName' },
+  { label: 'Prénom', key: 'firstName', sortKey: 'firstName' },
+  { label: 'Pseudo', key: 'pseudo', sortKey: 'pseudo' },
+  { label: 'G.', key: 'gender', sortKey: 'gender' },
+  { label: 'Niveau', key: 'level', sortKey: 'level' },
+  { label: 'Club', key: 'club', sortKey: 'club' },
+  { label: 'Trn.', key: 'tournamentCount', sortKey: 'tournamentCount' },
+  { label: 'ELO', key: 'elo', sortKey: 'elo' },
+]
+
+const DEFAULT_PLAYER_COLUMN_WIDTHS: Record<PlayerColumnKey, number> = {
+  playerNumber: 72,
+  lastName: 150,
+  firstName: 110,
+  pseudo: 110,
+  gender: 44,
+  level: 110,
+  club: 140,
+  tournamentCount: 56,
+  elo: 72,
+}
+
+const PLAYER_COLUMN_WIDTHS_KEY = 'shuttlecup.players.columnWidths'
+
+function playerGridTemplate(widths: Record<PlayerColumnKey, number>): string {
+  return PLAYER_COLUMNS.map(({ key }) => `minmax(${widths[key]}px, 1fr)`).join(' ')
+}
+
+function readPlayerColumnWidths(): Record<PlayerColumnKey, number> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PLAYER_COLUMN_WIDTHS_KEY) ?? '{}') as Record<string, unknown>
+    return Object.fromEntries(
+      Object.entries(DEFAULT_PLAYER_COLUMN_WIDTHS).map(([key, fallback]) => [
+        key,
+        typeof saved[key] === 'number' ? saved[key] : fallback,
+      ])
+    ) as Record<PlayerColumnKey, number>
+  } catch {
+    return { ...DEFAULT_PLAYER_COLUMN_WIDTHS }
+  }
+}
 
 const LEVEL_ORDER: Record<string, number> = { 'Avancé': 0, 'Intermédiaire': 1, 'Débutant': 2 }
 
@@ -203,6 +248,70 @@ export function PlayersPage() {
   const [csvImporting, setCsvImporting] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [columnWidths, setColumnWidths] = useState<Record<PlayerColumnKey, number>>(readPlayerColumnWidths)
+  const resizeState = useRef<{ key: PlayerColumnKey; startX: number; startWidth: number } | null>(null)
+  const autoFitDone = useRef(false)
+
+  const setColumnWidth = (key: PlayerColumnKey, width: number) => {
+    const next = { ...columnWidths, [key]: Math.max(44, Math.min(420, Math.round(width))) }
+    setColumnWidths(next)
+    localStorage.setItem(PLAYER_COLUMN_WIDTHS_KEY, JSON.stringify(next))
+  }
+
+  const autoFitColumns = (rows: Player[]) => {
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (!context) return
+    const widths = { ...DEFAULT_PLAYER_COLUMN_WIDTHS }
+    const measure = (value: string, font: string) => {
+      context.font = font
+      return Math.ceil(context.measureText(value).width) + 32
+    }
+    const headerFont = '700 11px "JetBrains Mono", monospace'
+    const bodyFont = '400 14px Inter, sans-serif'
+    const values: Record<SortKey, string[]> = {
+      playerNumber: rows.map((p) => p.playerNumber != null ? String(p.playerNumber).padStart(2, '0') : '—'),
+      lastName: rows.map((p) => p.lastName.toUpperCase()),
+      firstName: rows.map((p) => p.firstName),
+      pseudo: rows.map((p) => p.pseudo ? `"${p.pseudo}"` : '—'),
+      gender: rows.map((p) => p.gender === 'M' ? 'H' : 'F'),
+      level: rows.map((p) => `${levelGroup(p.level)} ${p.level}`),
+      club: rows.map((p) => p.club || '—'),
+      tournamentCount: rows.map((p) => String(p.tournamentCount ?? 0)),
+      elo: rows.map((p) => p.elo != null ? String(p.elo) : '—'),
+    }
+    for (const column of PLAYER_COLUMNS) {
+      widths[column.key] = Math.max(
+        measure(column.label, headerFont),
+        ...values[column.key].map((value) => measure(value, bodyFont)),
+        DEFAULT_PLAYER_COLUMN_WIDTHS[column.key]
+      )
+    }
+    const next = { ...columnWidths, ...widths }
+    setColumnWidths(next)
+    localStorage.setItem(PLAYER_COLUMN_WIDTHS_KEY, JSON.stringify(next))
+  }
+
+  const startColumnResize = (key: PlayerColumnKey, event: React.PointerEvent<HTMLSpanElement>) => {
+    event.preventDefault()
+    resizeState.current = { key, startX: event.clientX, startWidth: columnWidths[key] }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const active = resizeState.current
+      if (!active) return
+      setColumnWidth(active.key, active.startWidth + event.clientX - active.startX)
+    }
+    const stopResize = () => { resizeState.current = null }
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResize)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResize)
+    }
+  })
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -214,6 +323,13 @@ export function PlayersPage() {
   }
 
   useEffect(() => { void fetchPlayers() }, [fetchPlayers])
+
+  useEffect(() => {
+    if (!isLoading && players.length > 0 && !autoFitDone.current) {
+      autoFitColumns(players)
+      autoFitDone.current = true
+    }
+  }, [isLoading, players])
 
   // Clubs distincts
   const clubs = useMemo(() => {
@@ -429,39 +545,50 @@ export function PlayersPage() {
         ) : (
           <div className="overflow-x-auto">
           <div className="border-2 border-line min-w-[900px]">
+            <div className="flex items-center justify-between border-b border-line-soft bg-bg px-3 py-2">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-ink-3">
+                Largeurs personnalisables
+              </span>
+              <button
+                type="button"
+                onClick={() => autoFitColumns(players)}
+                className="flex min-h-[32px] items-center gap-1.5 px-2 font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-blue hover:bg-bg-strong"
+                title="Ajuster automatiquement les colonnes au contenu"
+              >
+                <ChevronsUpDown size={12} />
+                Ajuster au contenu
+              </button>
+            </div>
             {/* En-têtes avec tri */}
-            <div className="grid grid-cols-[72px_minmax(150px,1fr)_110px_110px_44px_110px_minmax(100px,1fr)_56px_72px_72px] bg-ink">
-              {([
-                ['N° Doss.',  'playerNumber'],
-                ['Nom',     'lastName'],
-                ['Prénom',  'firstName'],
-                ['Pseudo',  'pseudo'],
-                ['G.',      'gender'],
-                ['Niveau',  'level'],
-                ['Club',    'club'],
-                ['Trn.',    'tournamentCount'],
-                ['ELO',     'elo'],
-                ['',        null],
-              ] as [string, SortKey | null][]).map(([label, key]) => (
-                key ? (
-                  <button
-                    key={label}
-                    onClick={() => handleSort(key)}
-                    className="flex items-center gap-1 px-4 py-3 text-left text-[11px] font-mono font-bold uppercase tracking-[0.08em]
-                      text-green-fluo hover:text-white transition-colors group"
-                  >
-                    {label}
-                    <span className="text-green-fluo/60 group-hover:text-white/60">
-                      {sortKey === key
-                        ? sortDir === 'asc'
-                          ? <ChevronUp size={11} />
-                          : <ChevronDown size={11} />
-                        : <ChevronsUpDown size={11} />}
-                    </span>
-                  </button>
-                ) : (
-                  <span key={label} className="px-4 py-3" />
-                )
+            <div
+              className="grid w-full bg-ink"
+              style={{ gridTemplateColumns: playerGridTemplate(columnWidths) }}
+            >
+              {PLAYER_COLUMNS.map(({ label, key, sortKey: columnSortKey }) => (
+                <div key={key} className="relative min-w-0">
+                  {columnSortKey ? (
+                    <button
+                      onClick={() => handleSort(columnSortKey)}
+                      className="flex w-full items-center gap-1 px-4 py-3 text-left text-[11px] font-mono font-bold uppercase tracking-[0.08em]
+                        text-green-fluo hover:text-white transition-colors group"
+                    >
+                      <span className="truncate">{label}</span>
+                      <span className="text-green-fluo/60 group-hover:text-white/60">
+                        {sortKey === columnSortKey
+                          ? sortDir === 'asc'
+                            ? <ChevronUp size={11} />
+                            : <ChevronDown size={11} />
+                          : <ChevronsUpDown size={11} />}
+                      </span>
+                    </button>
+                  ) : <span className="block px-4 py-3" />}
+                  <span
+                    role="separator"
+                    aria-label={`Redimensionner la colonne ${label}`}
+                    onPointerDown={(event) => startColumnResize(key, event)}
+                    className="absolute right-0 top-0 z-10 h-full w-2 cursor-col-resize bg-transparent hover:bg-green-fluo/60"
+                  />
+                </div>
               ))}
             </div>
 
@@ -477,9 +604,10 @@ export function PlayersPage() {
               sortedFiltered.map((player, i) => (
                 <div
                   key={player.id}
-                  className={`grid grid-cols-[72px_minmax(150px,1fr)_110px_110px_44px_110px_minmax(100px,1fr)_56px_72px_72px] items-center px-4 py-3
+                  className={`relative grid w-full items-center px-4 py-3
                     border-b border-line-soft transition-colors hover:bg-bg-strong group
                     ${i % 2 === 0 ? 'bg-bg' : 'bg-bg-alt'}`}
+                  style={{ gridTemplateColumns: playerGridTemplate(columnWidths) }}
                 >
                   {/* # dossard */}
                   <span className="font-mono font-bold text-[13px] text-ink-3">
@@ -515,12 +643,12 @@ export function PlayersPage() {
                     {player.tournamentCount ?? 0}
                   </span>
                   {/* ELO */}
-                  <span className={`font-mono font-bold text-[15px] text-right
+                  <span className={`font-mono font-bold text-[15px] text-center
                     ${(player.elo ?? 0) >= 1200 ? 'text-blue' : (player.elo ?? 0) >= 1000 ? 'text-ink' : 'text-ink-3'}`}>
                     {player.elo != null ? player.elo : <span className="text-ink-3">—</span>}
                   </span>
                   {/* Actions */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 justify-end">
+                  <div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 bg-bg-strong px-1 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100">
                     <button
                       onClick={() => openEdit(player)}
                       className="p-2 text-ink-3 hover:text-blue transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center"
