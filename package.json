@@ -2,6 +2,7 @@
   "name": "shuttlecup",
   "version": "1.0.2",
   "private": true,
+  "author": "Alexis Priou / Alexis And Com",
   "description": "Gestionnaire de tournois de badminton pour clubs",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -20,6 +21,7 @@
     "dist:mac:arm64": "npm run build && electron-builder --mac --arm64",
     "dist:mac:x64": "npm run build && electron-builder --mac --x64",
     "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:msix": "npm run build && electron-builder --win appx --x64 --config electron-builder.config.js",
     "dist:linux": "npm run build && electron-builder --linux --x64",
     "dist:all": "npm run build && electron-builder --mac --win --linux"
   },

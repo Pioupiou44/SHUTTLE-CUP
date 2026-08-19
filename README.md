@@ -106,6 +106,7 @@ npm run rebuild-natives
 # Packaging (raccourcis — lancent un build avant la distribution)
 npm run dist:mac      # macOS arm64 + x64 (nécessite les variables de notarisation)
 npm run dist:win      # Windows NSIS x64
+npm run dist:msix     # Windows Store (format AppX/MSIX) x64
 npm run dist:linux    # Linux AppImage + .deb x64
 npm run dist:all      # Toutes les plateformes
 ```
@@ -532,6 +533,9 @@ npx electron-builder --mac --arm64 --x64
 # Windows — installeur NSIS x64
 npx electron-builder --win --x64
 
+# Windows Store — package AppX/MSIX x64
+npx electron-builder --win appx --x64 --config electron-builder.config.js
+
 # Linux — AppImage + .deb x64
 npx electron-builder --linux --x64
 ```
@@ -543,6 +547,7 @@ Les artefacts sont générés dans `release/` (ignoré par git) :
 | `ShuttleCup-{version}-arm64.dmg` | macOS Apple Silicon |
 | `ShuttleCup-{version}.dmg` | macOS Intel x64 |
 | `ShuttleCup Setup {version}.exe` | Windows x64 (NSIS) |
+| `ShuttleCup-{version}.appx` | Windows Store (AppX/MSIX) x64 |
 | `ShuttleCup-{version}.AppImage` | Linux x64 |
 | `shuttlecup_{version}_amd64.deb` | Linux Debian/Ubuntu |
 
@@ -605,5 +610,4 @@ export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 ## Licence
 
 ShuttleCup — Copyright © 2026 Alexis Priou. GNU AGPL v3. Voir [LICENSE](LICENSE).
-
 
