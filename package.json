@@ -2,7 +2,7 @@
   "name": "shuttlecup",
   "version": "1.0.2",
   "private": true,
-  "author": "Alexis Priou / Alexis And Com",
+  "author": "Alexis & Com",
   "description": "Gestionnaire de tournois de badminton pour clubs",
   "main": "dist-electron/main.js",
   "scripts": {

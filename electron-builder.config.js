@@ -76,7 +76,7 @@ module.exports = {
   },
 
   appx: {
-    publisherDisplayName: 'Alexis &amp; Com',
+    publisherDisplayName: 'Alexis & Com',
   },
 
   nsis: {
