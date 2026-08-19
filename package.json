@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
-    "@electron/rebuild": "^3.6.0",
+    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^7.6.9",
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.73",
@@ -41,7 +41,7 @@
     "clsx": "^2.1.0",
     "concurrently": "^8.2.2",
     "electron": "^30.0.0",
-    "electron-builder": "^24.13.3",
+    "electron-builder": "^26.15.3",
     "lucide-react": "^0.363.0",
     "postcss": "^8.4.38",
     "react": "^18.2.0",
