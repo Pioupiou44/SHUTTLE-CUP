@@ -76,7 +76,11 @@ module.exports = {
   },
 
   appx: {
+    identityName: 'AlexisCom.ShuttleCup',
+    publisher: 'CN=1D022089-EC96-4731-8C42-D8A6FB2741BD',
+    displayName: 'Shuttle/Cup',
     publisherDisplayName: 'Alexis &amp; Com',
+    languages: ['fr-FR'],
   },
 
   nsis: {
