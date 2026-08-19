@@ -1,0 +1,67 @@
+name: Build MSIX
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branche, tag ou SHA à construire'
+        required: true
+        default: 'shuttle-cup_origin'
+
+jobs:
+  build-msix:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows application
+        run: npm run build && npx electron-builder --win --x64 --config.mac.identity=null
+
+      - name: Install AppX packager
+        run: npm install --no-save electron-windows-store@2.1.0
+
+      - name: Create MSIX package
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $packageVersion = "$version.0"
+          $output = Join-Path $PWD 'release/msix'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+
+          npx electron-windows-store `
+            --input-directory "$PWD/release/win-unpacked" `
+            --output-directory "$output" `
+            --package-version $packageVersion `
+            --package-name ShuttleCup `
+            --package-display-name ShuttleCup `
+            --package-description 'Gestionnaire de tournois de badminton pour clubs' `
+            --package-executable 'ShuttleCup.exe' `
+            --identity-name fr.alexisandcom.shuttlecup `
+            --publisher 'CN=Alexis Priou' `
+            --publisher-display-name 'Alexis Priou' `
+            --deploy false `
+            --verbose true
+
+          $appx = Get-ChildItem $output -Filter '*.appx' -File | Select-Object -First 1
+          if (-not $appx) { throw 'Aucun package AppX généré.' }
+          Rename-Item $appx.FullName (Join-Path $output "ShuttleCup-$version.msix")
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShuttleCup-msix-${{ inputs.ref }}
+          path: release/msix/*.msix
+          if-no-files-found: error
