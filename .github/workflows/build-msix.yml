@@ -49,6 +49,7 @@ jobs:
             --package-display-name ShuttleCup `
             --package-description 'Gestionnaire de tournois de badminton pour clubs' `
             --package-executable 'ShuttleCup.exe' `
+            --assets "$PWD/assets/msix" `
             --identity-name fr.alexisandcom.shuttlecup `
             --publisher 'CN=Alexis Priou' `
             --publisher-display-name 'Alexis Priou' `
