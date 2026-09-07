@@ -86,7 +86,7 @@ export function DevUI() {
     <div className="p-8 max-w-5xl">
       {/* En-tête */}
       <div className="mb-10">
-        <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+        <h1 className="font-sans font-black uppercase text-page-title tracking-[-0.03em] text-ink leading-none">
           Dev UI
         </h1>
         <p className="font-sans text-[14px] text-ink-3 mt-2">

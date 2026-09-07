@@ -8,6 +8,7 @@ import {
   matchQueries,
   adminQueries,
   importTournament,
+  importFullBackup,
 } from './queries'
 
 // ─── Helpers de validation ────────────────────────────────────────────────────
@@ -140,5 +141,17 @@ export function registerDbHandlers(ipcMain: IpcMain): void {
       throw new Error('Structure de sauvegarde invalide')
     }
     return importTournament(s as Parameters<typeof importTournament>[0])
+  })
+
+  // Restauration d'une sauvegarde complète (joueurs + règles + tournois)
+  ipcMain.handle('db:importFullBackup', (_event, backup: unknown) => {
+    if (!backup || typeof backup !== 'object') throw new Error('Données de sauvegarde invalides')
+    const b = backup as Record<string, unknown>
+    if (b['version'] !== 1) throw new Error('Version de sauvegarde non prise en charge')
+    if (!Array.isArray(b['tournaments'])) throw new Error('Structure de sauvegarde invalide')
+    return importFullBackup(
+      b as Parameters<typeof importFullBackup>[0],
+      importTournament
+    )
   })
 }

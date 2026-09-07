@@ -7,7 +7,9 @@ import { playerDisplayName, CATEGORY_LABELS } from '@/types/domain'
 import { computeStandings } from '@/engine/standings'
 import { Printer, ArrowLeft } from 'lucide-react'
 import type { Match, MatchScore, ScoringRule, TournamentFormat } from '@/types/domain'
-import logoSrc from '../../public/fonts/logo.png'
+// Logo bundlé par Vite (src/assets) : URL relative résolue par le bundler —
+// fonctionne en dev, en prod Electron (file:// + asar) et sur Android.
+import logoSrc from '@/assets/logo.png'
 
 // ─── Labels courts des formats ────────────────────────────────────────────────
 const FORMAT_SHORT: Record<TournamentFormat, string> = {
@@ -188,6 +190,18 @@ export function PrintView() {
   const resultsPageNum = matches.length > 0 ? ++pageNum : null
   const participantsPageNum = tournamentPlayerIds.length > 0 ? ++pageNum : null
 
+  // Impression : sur Android (WebView), window.print() ne fait rien — on passe
+  // par le pont natif window.AndroidBridge (PrintManager système, imprimante
+  // ou PDF). Sur desktop/Electron, comportement natif classique.
+  const handlePrint = () => {
+    const bridge = (window as { AndroidBridge?: { print: () => void } }).AndroidBridge
+    if (bridge?.print) {
+      bridge.print()
+    } else {
+      window.print()
+    }
+  }
+
   return (
     <div className="bg-bg">
 
@@ -218,7 +232,7 @@ export function PrintView() {
           </span>
         </div>
         <button
-          onClick={() => window.print()}
+          onClick={handlePrint}
           className="flex items-center gap-2 px-5 py-2 bg-green-fluo text-ink font-black
             text-[12px] uppercase tracking-[0.05em] hover:brightness-110 transition-all min-h-[44px]"
         >

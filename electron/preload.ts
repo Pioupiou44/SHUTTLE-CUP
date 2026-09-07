@@ -63,6 +63,7 @@ const dbApi = {
 
   // Sauvegarde / restauration
   importTournament: (snapshot: unknown) => ipcRenderer.invoke('db:importTournament', snapshot),
+  importFullBackup: (backup: unknown) => ipcRenderer.invoke('db:importFullBackup', backup),
 
   // Fenêtre d'affichage secondaire
   openNewWindow: (hash: string) => ipcRenderer.invoke('open-new-window', hash),

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Palette ShuttleCup « Live Sport · Mode Clair » (cf. AGENTS.md) -->
+    <color name="colorPrimary">#0A0A0A</color>
+    <color name="colorPrimaryDark">#FAFAF7</color>
+    <color name="colorAccent">#0047FF</color>
+    <color name="bgPaper">#FAFAF7</color>
+    <color name="ink">#0A0A0A</color>
+</resources>

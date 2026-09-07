@@ -39,7 +39,7 @@ function StatCard({
       </div>
       <div>
         <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3">{label}</p>
-        <p className="font-sans font-black text-[42px] tracking-[-0.03em] text-ink leading-none mt-1">{value}</p>
+        <p className="font-sans font-black text-page-title tracking-[-0.03em] text-ink leading-none mt-1">{value}</p>
       </div>
     </div>
   )
@@ -62,7 +62,7 @@ export function Dashboard() {
     <div className="p-8 max-w-5xl">
       {/* En-tête */}
       <div className="mb-8">
-        <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+        <h1 className="font-sans font-black uppercase text-page-title tracking-[-0.03em] text-ink leading-none">
           Accueil
         </h1>
         <p className="font-sans text-[14px] text-ink-3 mt-1">
@@ -71,7 +71,7 @@ export function Dashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         <StatCard icon={Trophy} label="Tournois" value={tournaments.length} />
         <StatCard icon={Users} label="Joueurs" value={players.length} />
         <StatCard icon={Activity} label="En cours" value={activeTournaments.length} accent />

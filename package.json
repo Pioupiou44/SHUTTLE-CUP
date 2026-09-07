@@ -1,9 +1,10 @@
 {
   "name": "shuttlecup",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "author": "Alexis & Com",
   "description": "Gestionnaire de tournois de badminton pour clubs",
+  "homepage": "https://shuttle.cup.alexisandcom.fr",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -23,18 +24,30 @@
     "dist:win": "npm run build && electron-builder --win --x64",
     "dist:msix": "npm run build && electron-builder --win appx --x64 --config electron-builder.config.js",
     "dist:linux": "npm run build && electron-builder --linux --x64",
-    "dist:all": "npm run build && electron-builder --mac --win --linux"
+    "dist:all": "npm run build && electron-builder --mac --win --linux",
+    "build:android": "tsc && vite build -c vite.config.android.ts",
+    "cap:sync": "npm run build:android && npx cap sync android",
+    "cap:run": "npm run cap:sync && npx cap run android",
+    "apk:debug": "npm run cap:sync && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^7.0.3",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/core": "^7.6.9",
+    "@capacitor/filesystem": "^7.1.8",
+    "@capacitor/status-bar": "^7.0.6",
     "better-sqlite3": "^9.4.3"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/cli": "^7.6.9",
     "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^3.6.0",
     "@types/better-sqlite3": "^7.6.9",
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.73",
     "@types/react-dom": "^18.2.23",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^4.1.6",
     "autoprefixer": "^10.4.19",
@@ -54,6 +67,7 @@
     "vite-plugin-electron": "^0.28.7",
     "vite-plugin-electron-renderer": "^0.14.5",
     "vitest": "^4.1.6",
+    "ws": "^8.21.3",
     "zustand": "^4.5.2"
   }
 }

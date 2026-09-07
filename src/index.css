@@ -91,7 +91,11 @@
   }
 
   #root {
+    /* 100dvh (dynamic viewport height) : hauteur réelle de la zone visible dans le
+       WebView Android — 100vh y inclut la barre de statut masquée par les insets
+       dynamiques, d'où un layout trop court en portrait. Fallback 100vh desktop. */
     height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
   }
@@ -100,6 +104,17 @@
   :focus-visible {
     outline: 2px solid var(--color-blue);
     outline-offset: 2px;
+  }
+
+  /* Boutons révélés au survol (opacity-0 group-hover:opacity-100) : sur
+     appareil TACTILE (tablettes/mobiles sans souris), le hover n'existe pas
+     et ces actions restaient invisibles à jamais (Archiver, Supprimer…).
+     On ne les masque que si l'appareil possède un vrai pointeur hover.
+     Le group-hover de Tailwind continue de fonctionner normalement en desktop. */
+  @media (hover: none) {
+    .opacity-0.group-hover\:opacity-100 {
+      opacity: 1 !important;
+    }
   }
 }
 

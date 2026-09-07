@@ -77,7 +77,7 @@ export function TournamentsPage() {
       {/* En-tête */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+          <h1 className="font-sans font-black uppercase text-page-title tracking-[-0.03em] text-ink leading-none">
             Tournois
           </h1>
           <p className="font-sans text-[14px] text-ink-3 mt-2">

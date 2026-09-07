@@ -73,5 +73,17 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // text-page-title : titre de page fluide — 42px desktop, 28px minimum sur
+    // tablette portrait/mobile (l'app desktop restait énorme en paysage serré).
+    function ({ addUtilities }: { addUtilities: (u: Record<string, Record<string, string>>) => void }) {
+      addUtilities({
+        '.text-page-title': {
+          'font-size': 'clamp(28px, 4.5vw, 42px)',
+          'line-height': '1',
+          'letter-spacing': '-0.03em',
+        },
+      })
+    },
+  ],
 } satisfies Config
