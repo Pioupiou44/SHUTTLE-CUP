@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRulesStore } from '@/store/rulesStore'
 import { Button, Badge, Modal, Input, Select } from '@/components/ui'
-import { Pencil, Trash2, Plus, Lock } from 'lucide-react'
-import type { ScoringRule } from '@/types/domain'
+import { SidePanel } from '@/components/SidePanel'
+import { saveTextFile } from '@/lib/files'
+import { Pencil, Trash2, Plus, Lock, Download, Upload } from 'lucide-react'
+import type { ScoringRule, Player, TournamentPlayer, Match, MatchScore } from '@/types/domain'
 
 // ─── Formulaire règle ─────────────────────────────────────────────────────────
 
@@ -226,18 +228,92 @@ export function SettingsPage() {
     }
   }
 
+  // ── Sauvegarde complète (toutes les données de l'app) ────────────────────
+  const [backupState, setBackupState] = useState<'idle' | 'working'>('idle')
+  const [restoreState, setRestoreState] = useState<'idle' | 'working'>('idle')
+  const [restoreMessage, setRestoreMessage] = useState<{ ok: boolean; text: string } | null>(null)
+  const backupFileRef = useRef<HTMLInputElement>(null)
+
+  const handleRestoreBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setRestoreState('working')
+    setRestoreMessage(null)
+    try {
+      const text = await file.text()
+      const backup = JSON.parse(text)
+      const result = await window.db.importFullBackup(backup)
+      setRestoreMessage({
+        ok: true,
+        text: `Restauration terminée : ${result.playersImported} joueur(s), ${result.rulesImported} règle(s), ${result.tournamentsImported} tournoi(s) importé(s). Les éléments déjà existants ont été ignorés.`,
+      })
+    } catch (err) {
+      setRestoreMessage({
+        ok: false,
+        text: err instanceof Error ? err.message : 'Fichier de sauvegarde invalide',
+      })
+    } finally {
+      setRestoreState('idle')
+    }
+  }
+
+  const handleFullBackup = async () => {
+    setBackupState('working')
+    try {
+      const [players, rules, tournaments] = await Promise.all([
+        window.db.getPlayers(),
+        window.db.getScoringRules(),
+        window.db.getTournaments(),
+      ])
+
+      // Tournois avec leurs inscriptions, matchs et scores
+      const tournamentsDetail = await Promise.all(
+        tournaments.map(async (t) => ({
+          tournament: t,
+          players: await window.db.getTournamentPlayers(t.id) as TournamentPlayer[],
+          matches: await window.db.getMatches(t.id) as Match[],
+          scores: await window.db.getAllMatchScores(t.id),
+        }))
+      )
+
+      const backup = {
+        version: 1 as const,
+        exportedAt: new Date().toISOString(),
+        app: 'shuttlecup',
+        players: players as Player[],
+        scoringRules: rules,
+        tournaments: tournamentsDetail.map((d) => ({
+          ...d.tournament,
+          tournamentPlayers: d.players,
+          matches: d.matches,
+          matchScores: d.scores as MatchScore[],
+        })),
+      }
+
+      const date = new Date().toISOString().slice(0, 10)
+      await saveTextFile(
+        `sauvegarde-complete-shuttlecup-${date}.json`,
+        JSON.stringify(backup, null, 2),
+        'application/json'
+      )
+    } finally {
+      setBackupState('idle')
+    }
+  }
+
   return (
     <div className="flex h-full">
-      {/* Zone gauche 60% — liste + actions */}
-      <div className="flex-[3] overflow-y-auto scrollbar-light border-r-2 border-line p-8">
+      {/* Zone liste — pleine largeur quand le volet est fermé */}
+      <div className="flex-1 min-w-0 overflow-y-auto scrollbar-light p-8">
         {/* En-tête */}
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+            <h1 className="font-sans font-black uppercase text-page-title tracking-[-0.03em] text-ink leading-none">
               Configuration
             </h1>
             <p className="font-sans text-[14px] text-ink-3 mt-2">
-              Règles de scoring — l'aperçu à droite se met à jour en temps réel.
+              Règles de scoring — l'aperçu se met à jour en temps réel.
             </p>
           </div>
           <Button onClick={openCreate} className="shrink-0 mt-1">
@@ -307,6 +383,39 @@ export function SettingsPage() {
           </div>
         )}
 
+        {/* Sauvegarde complète */}
+        <div className="mt-16 pt-8 border-t-2 border-line">
+          <h2 className="font-sans font-black uppercase text-[13px] tracking-[0.08em] text-ink-3 mb-2">
+            Sauvegarde complète
+          </h2>
+          <p className="font-sans text-[12px] text-ink-3 mb-4 max-w-xl">
+            Exporte l'intégralité des données (joueurs, règles, tournois, matchs, scores)
+            dans un fichier JSON. À conserver avant une mise à jour ou un changement d'appareil.
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="secondary" onClick={() => void handleFullBackup()} disabled={backupState === 'working'}>
+              <Download size={14} className="mr-2 inline" />
+              {backupState === 'working' ? 'Export…' : 'Exporter toutes les données'}
+            </Button>
+            <input
+              ref={backupFileRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => { void handleRestoreBackup(e) }}
+            />
+            <Button variant="secondary" onClick={() => backupFileRef.current?.click()} disabled={restoreState === 'working'}>
+              <Upload size={14} className="mr-2 inline" />
+              {restoreState === 'working' ? 'Import…' : 'Restaurer une sauvegarde'}
+            </Button>
+          </div>
+          {restoreMessage && (
+            <p className={`font-sans text-[13px] mt-3 ${restoreMessage.ok ? 'text-green' : 'text-red'}`}>
+              {restoreMessage.ok ? '✓ ' : '✕ '}{restoreMessage.text}
+            </p>
+          )}
+        </div>
+
         {/* À propos */}
         <div className="mt-16 pt-8 border-t-2 border-line">
           <h2 className="font-sans font-black uppercase text-[13px] tracking-[0.08em] text-ink-3 mb-6">
@@ -319,7 +428,7 @@ export function SettingsPage() {
             </div>
             <div className="flex items-baseline justify-between">
               <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Version</span>
-              <span className="font-sans text-[14px] text-ink">1.0.2 <span className="font-mono text-[11px] text-ink-3">BETA</span></span>
+              <span className="font-sans text-[14px] text-ink">1.0.3 <span className="font-mono text-[11px] text-ink-3">BETA</span></span>
             </div>
             <div className="flex items-baseline justify-between">
               <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">Licence</span>
@@ -346,10 +455,10 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Zone droite 40% — aperçu live */}
-      <div className="flex-[2] bg-bg-alt sticky top-0 h-full overflow-y-auto scrollbar-light">
+      {/* Volet droit — aperçu live (rétractable, superposé sur tablette) */}
+      <SidePanel title="Aperçu règle">
         <RulePreview rule={previewData} />
-      </div>
+      </SidePanel>
 
       {/* Modal création / édition */}
       <Modal

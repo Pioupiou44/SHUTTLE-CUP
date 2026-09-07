@@ -4,6 +4,7 @@ import { useTournamentsStore } from '@/store/tournamentsStore'
 import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
 import { Button, Input, Tag, Badge } from '@/components/ui'
+import { SidePanel } from '@/components/SidePanel'
 import { ChevronRight, ChevronLeft, Users, Trophy, Settings, AlignLeft, Shield, ChevronUp, ChevronDown, ChevronsUpDown, Shuffle, Plus, X, Layers2, LayoutGrid } from 'lucide-react'
 import { playerDisplayName, FORMAT_LABELS, CATEGORY_LABELS } from '@/types/domain'
 import { TOURNAMENT_MODELS, modelStillMatchesConfig, resolveRuleByNames } from '@/lib/tournamentModels'
@@ -2035,11 +2036,11 @@ export function TournamentWizard() {
 
   return (
     <div className="flex h-full">
-      {/* Zone gauche 60% */}
-      <div className="flex-[3] overflow-y-auto scrollbar-light border-r-2 border-line p-8">
+      {/* Zone principale — pleine largeur quand le volet est fermé */}
+      <div className="flex-1 min-w-0 overflow-y-auto scrollbar-light p-8">
         {/* En-tête */}
         <div className="mb-8">
-          <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+          <h1 className="font-sans font-black uppercase text-page-title tracking-[-0.03em] text-ink leading-none">
             Nouveau tournoi
           </h1>
           <p className="font-sans text-[14px] text-ink-3 mt-2">
@@ -2115,15 +2116,15 @@ export function TournamentWizard() {
         </div>
       </div>
 
-      {/* Zone droite 40% — aperçu */}
-      <div className="flex-[2] bg-bg-alt sticky top-0 h-full overflow-y-auto scrollbar-light">
+      {/* Volet droit — aperçu live (rétractable, superposé sur tablette) */}
+      <SidePanel title="Aperçu tournoi">
         <TournamentPreview
           data={data}
           selectedPlayers={selectedPlayers}
           selectedRule={selectedRule}
           selectedModel={selectedModel}
         />
-      </div>
+      </SidePanel>
     </div>
   )
 }

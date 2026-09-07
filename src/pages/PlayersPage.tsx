@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { usePlayersStore } from '@/store/playersStore'
 import { Button, Modal, Input, Select, Tag } from '@/components/ui'
 import { Pencil, Trash2, Plus, Search, Upload, Download, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react'
+import { saveTextFile } from '@/lib/files'
 import { playerDisplayName } from '@/types/domain'
 import type { Player, Gender } from '@/types/domain'
 
@@ -404,11 +405,8 @@ export function PlayersPage() {
     const rows = filtered.map((p) =>
       [p.firstName, p.lastName, p.gender, p.level, p.pseudo ?? '', p.club ?? '', p.elo ?? '', p.playerNumber ?? ''].join(',')
     )
-    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url
-    a.download = `joueurs-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click(); URL.revokeObjectURL(url)
+    const content = [header, ...rows].join('\n')
+    void saveTextFile(`joueurs-${new Date().toISOString().slice(0, 10)}.csv`, content, 'text/csv')
   }
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -437,7 +435,7 @@ export function PlayersPage() {
       <div className="border-b-2 border-line bg-bg shrink-0">
         <div className="px-8 pt-8 pb-5 flex items-start justify-between gap-4">
           <div>
-            <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+            <h1 className="font-sans font-black uppercase text-page-title tracking-[-0.03em] text-ink leading-none">
               Joueurs
             </h1>
             <p className="font-sans text-[14px] text-ink-3 mt-2">
@@ -543,8 +541,14 @@ export function PlayersPage() {
         {isLoading ? (
           <p className="font-sans text-[14px] text-ink-3">Chargement…</p>
         ) : (
+          // Cadre du tableau — minWidth dynamique : les largeurs de colonnes
+          // personnalisées peuvent dépasser 900px (auto-fit) ; le cadre doit
+          // envelopper son contenu pour que les bordures restent alignées.
           <div className="overflow-x-auto">
-          <div className="border-2 border-line min-w-[900px]">
+          <div
+            className="border-2 border-line"
+            style={{ minWidth: `${Math.max(900, Object.values(columnWidths).reduce((a, b) => a + b, 0))}px` }}
+          >
             <div className="flex items-center justify-between border-b border-line-soft bg-bg px-3 py-2">
               <span className="font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-ink-3">
                 Largeurs personnalisables
@@ -665,7 +669,9 @@ export function PlayersPage() {
                 </div>
               ))
             )}
-          </div>          </div>        )}
+          </div>
+          </div>
+        )}
       </div>
 
       {/* Modal création / édition */}

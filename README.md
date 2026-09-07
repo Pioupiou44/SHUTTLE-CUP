@@ -2,7 +2,7 @@
 
 Application de bureau pour la gestion complète de tournois de badminton en club.
 
-**Stack** : Electron 30 · React 18 · TypeScript strict · Vite 5 · Zustand · better-sqlite3 · Tailwind CSS · `v1.0.2`
+**Stack** : Electron 30 · React 18 · TypeScript strict · Vite 5 · Zustand · better-sqlite3 · Tailwind CSS · `v1.0.3`
 
 🌐 **Site officiel** : [shuttle.cup.alexisandcom.fr](https://shuttle.cup.alexisandcom.fr)
 
@@ -108,6 +108,9 @@ npm run dist:mac      # macOS arm64 + x64 (nécessite les variables de notarisat
 npm run dist:win      # Windows NSIS x64
 npm run dist:msix     # Windows Store (format AppX/MSIX) x64
 npm run dist:linux    # Linux AppImage + .deb x64
+
+# Android — APK release (mise à jour compatible avec l'APK debug de test)
+npm run cap:sync && cd android && ./gradlew assembleRelease
 npm run dist:all      # Toutes les plateformes
 ```
 
@@ -538,6 +541,9 @@ npx electron-builder --win appx --x64 --config electron-builder.config.js
 
 # Linux — AppImage + .deb x64
 npx electron-builder --linux --x64
+
+# Android — APK release
+npm run cap:sync && cd android && ./gradlew assembleRelease
 ```
 
 Les artefacts sont générés dans `release/` (ignoré par git) :
@@ -550,6 +556,7 @@ Les artefacts sont générés dans `release/` (ignoré par git) :
 | `ShuttleCup-{version}.appx` | Windows Store (AppX/MSIX) x64 |
 | `ShuttleCup-{version}.AppImage` | Linux x64 |
 | `shuttlecup_{version}_amd64.deb` | Linux Debian/Ubuntu |
+| `ShuttleCup-{version}-android-release.apk` | Android arm64 / x64 — APK release |
 
 ### Notarisation macOS
 
@@ -585,7 +592,7 @@ export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 | **9 · Impression** | ✅ | Vue `/print` : planning, classements, résultats avec logo et pied de page |
 | **Sécurité IPC** | ✅ | Validation entrées IPC (IDs, enum statuts, scores), guard prod (`clearAllData` dev-only), hash fenêtre sanitisé |
 | **10 · Engine Swiss & King of Court** | ✅ | Générateurs + rondes dynamiques (bouton "Ronde N ▶" dans l'onglet Planning) |
-| **11 · Distribution v1.0.2** | ✅ | macOS (arm64 + x64), Windows NSIS, Linux AppImage + deb |
+| **11 · Distribution v1.0.3** | 🚧 | Android APK release + Windows NSIS en validation ; macOS et Linux attendent la validation Windows |
 | **12 · Activation Swiss & KoC wizard** | ✅ | Swiss & King of Court activés dans le wizard — étapes, preview, validation min. 4 joueurs |
 | **13 · Archives & export** | ✅ | Export CSV joueurs (+ N° dossard, normalisation H→M), export classement + résultats matchs par tournoi |
 | **14 · Tests** | ✅ | Vitest — 176 tests (scoring, standings, roundRobin, Swiss, américano, KoC, singleElim, poolPlusKnockout) — `npm run test` |

@@ -60,6 +60,13 @@ export interface DbApi {
   // Sauvegarde / restauration
   importTournament: (snapshot: unknown) => Promise<{ tournamentId: number }>
 
+  /** Import d'une sauvegarde complète (joueurs + règles + tous les tournois). */
+  importFullBackup: (backup: unknown) => Promise<{
+    playersImported: number
+    rulesImported: number
+    tournamentsImported: number
+  }>
+
   // Fenêtre d'affichage secondaire
   openNewWindow: (hash: string) => Promise<void>
 }

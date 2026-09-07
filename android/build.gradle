@@ -1,0 +1,42 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.2'
+        classpath 'com.google.gms:google-services:4.4.2'
+
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
+    }
+}
+
+apply from: "variables.gradle"
+
+// ─── Correction exFAT ───────────────────────────────────────────────────────
+// Le volume du projet est en exFAT : macOS y crée des fichiers AppleDouble
+// (._*) que Gradle ne sait pas supprimer, ce qui fait échouer les builds.
+// Solution : rediriger les répertoires de build vers le disque interne (APFS).
+def exfatBuildRoot = "${System.getProperty('user.home')}/.gradle-shuttlecup-builds"
+def projectSlug = 'shuttlecup'
+project("${project.path}") {
+    buildDir = file("${exfatBuildRoot}/${projectSlug}/root")
+}
+subprojects { sp ->
+    sp.buildDir = file("${exfatBuildRoot}/${projectSlug}/${sp.name}")
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

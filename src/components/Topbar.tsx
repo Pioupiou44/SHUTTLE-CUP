@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import logoSrc from '../../public/fonts/logo.png'
+// Logo bundlé par Vite (src/assets) : URL relative résolue par le bundler —
+// fonctionne en dev, en prod Electron (file:// + asar) et sur Android.
+// L'ancien import '../../public/fonts/logo.png' cassait le dev Vite 5,
+// et l'URL absolue '/fonts/logo.png' ne résolvait pas en prod Electron.
+import logoSrc from '@/assets/logo.png'
 
 interface NavItem {
   to: string
@@ -92,7 +96,7 @@ export function Topbar() {
         </a>
         <div className="flex items-center px-4 border-l-2 border-line h-full gap-3">
           <span className="font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-ink-3 select-none">
-            BETA 1.0.2
+            BETA 1.0.3
           </span>
           <span className="font-mono font-bold text-[12px] text-ink-2 tracking-[0.05em]">
             {time}

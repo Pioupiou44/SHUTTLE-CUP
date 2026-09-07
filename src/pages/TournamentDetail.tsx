@@ -5,6 +5,7 @@ import { usePlayersStore } from '@/store/playersStore'
 import { useRulesStore } from '@/store/rulesStore'
 import { Button, Badge, Modal, Tag } from '@/components/ui'
 import { Play, ChevronLeft, Users, BarChart3, List, GitBranch, CheckCircle, Archive, Shuffle, Plus, X, Pencil, Radio, Printer, LayoutGrid, ExternalLink, RefreshCw, Download } from 'lucide-react'
+import { saveTextFile } from '@/lib/files'
 import { playerDisplayName, CATEGORY_LABELS } from '@/types/domain'
 import { generateRoundRobin } from '@/engine/generators/roundRobin'
 import { generateSingleElim } from '@/engine/generators/singleElim'
@@ -419,7 +420,10 @@ function ScoreEditorModal({
   const [scores, setScores] = useState<{ a: string; b: string }[]>([])
   const [saving, setSaving] = useState(false)
 
-  // Initialise les scores à l'ouverture de la modale
+  // Initialise les scores UNIQUEMENT à l'ouverture de la modale — pas à chaque
+  // refresh du polling (3s) : existingScores est une nouvelle référence de
+  // tableau à chaque handleRefresh, ce qui réinitialisait la saisie en cours
+  // (les champs se vidaient toutes les 3 secondes pendant la frappe).
   useEffect(() => {
     if (!isOpen) return
     setScores(
@@ -428,7 +432,8 @@ function ScoreEditorModal({
         return ex ? { a: String(ex.scoreA), b: String(ex.scoreB) } : { a: '', b: '' }
       })
     )
-  }, [isOpen, existingScores, maxSets])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
 
   // Détermine le gagnant de chaque set
   const setWinners = scores.map(({ a, b }) => {
@@ -466,11 +471,17 @@ function ScoreEditorModal({
       // Ne pas passer winnerId à updateMatchStatus : la colonne référence tournament_players(id)
       // alors que idA/idB sont des players(id) — on évite la contrainte FK.
       // Le vainqueur est identifiable via les scores/participants.
-      await window.db.updateMatchStatus(match.id, 'completed')
-      // Avance le bracket en passant le players.id (advanceWinner fait la jointure en interne)
-      const winnerPlayerId = winnerSide === 'A' ? idA : winnerSide === 'B' ? idB : undefined
-      if (winnerPlayerId !== undefined && !isNaN(winnerPlayerId)) {
-        await window.db.advanceWinner(match.tournamentId, match.id, winnerPlayerId)
+      if (winnerSide) {
+        // Match terminé : un vainqueur est déterminé par les sets gagnants
+        await window.db.updateMatchStatus(match.id, 'completed')
+        // Avance le bracket en passant le players.id (advanceWinner fait la jointure en interne)
+        const winnerPlayerId = winnerSide === 'A' ? idA : idB
+        if (!isNaN(winnerPlayerId)) {
+          await window.db.advanceWinner(match.tournamentId, match.id, winnerPlayerId)
+        }
+      } else {
+        // Score partiel : le match reste en cours — sauvegarde sans clôturer
+        await window.db.updateMatchStatus(match.id, 'in_progress')
       }
       onSaved()
       onClose()
@@ -613,10 +624,16 @@ function ScoreEditorModal({
           Annuler
         </Button>
         <Button
-          disabled={saving || filledCount === 0 || !winnerSide}
+          disabled={saving || filledCount === 0}
           onClick={() => void handleSave()}
         >
-          {saving ? 'Enregistrement…' : 'Valider le score'}
+          {saving
+            ? 'Enregistrement…'
+            : winnerSide
+              ? 'Valider le score'
+              : match.status === 'in_progress'
+                ? 'Enregistrer (match en cours)'
+                : 'Enregistrer le score'}
         </Button>
       </div>
     </Modal>
@@ -1116,7 +1133,10 @@ function PlanningTab({
             <p className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-ink-3 mb-2">
               {round >= 100 ? `Knockout — Tour ${round - 99}` : `Ronde ${round}`}
             </p>
-            <div className="flex flex-col border-2 border-line">
+            {/* Scroll horizontal sur écran étroit : le tableau garde une largeur
+                minimale lisible, l'entête et les lignes restent alignées. */}
+            <div className="overflow-x-auto scrollbar-light">
+            <div className="flex flex-col border-2 border-line min-w-[760px]">
               <div className={`grid ${colsHeader} bg-ink px-4 py-2`}>
                 {['Équipe A', 'Équipe B', 'Score', 'Terrain', ...(hasCats ? ['Discipline'] : []), 'Statut'].map((h) => (
                   <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
@@ -1277,6 +1297,7 @@ function PlanningTab({
                 )
               })}
             </div>
+            </div>
           </div>
         ))
       )}
@@ -1402,11 +1423,7 @@ function StandingsTab({
     }
 
     if (!csvContent) return
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url
-    a.download = `classement-${slug}-${date}.csv`
-    a.click(); URL.revokeObjectURL(url)
+    void saveTextFile(`classement-${slug}-${date}.csv`, csvContent, 'text/csv')
   }
 
   const exportBtn = (
@@ -1427,7 +1444,7 @@ function StandingsTab({
     return (
       <div className="flex flex-col gap-6">
         {exportBtn}
-        <div className="flex flex-col border-2 border-line">
+        <div className="overflow-x-auto scrollbar-light"><div className="flex flex-col border-2 border-line min-w-max">
           <div className="grid grid-cols-[32px_1fr_60px_60px_60px_80px] bg-ink px-4 py-3">
             {['#', 'Joueur', 'MJ', 'V', 'D', 'Pts cumulés'].map((h) => (
               <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
@@ -1446,6 +1463,7 @@ function StandingsTab({
             </div>
           ))}
         </div>
+        </div>
         <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
           Classement américano — rang par points cumulés (somme de tous les points marqués dans tous les matchs).
         </p>
@@ -1458,7 +1476,7 @@ function StandingsTab({
     return (
       <div className="flex flex-col gap-6">
         {exportBtn}
-        <div className="flex flex-col border-2 border-line">
+        <div className="overflow-x-auto scrollbar-light"><div className="flex flex-col border-2 border-line min-w-max">
           <div className="grid grid-cols-[32px_1fr_60px_60px_60px_80px_80px] bg-ink px-4 py-3">
             {['#', 'Joueur', 'MJ', 'V', 'D', 'Pts Swiss', 'Buchholz'].map((h) => (
               <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
@@ -1478,6 +1496,7 @@ function StandingsTab({
             </div>
           ))}
         </div>
+        </div>
         <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
           Pts Swiss : 2=victoire, 1=défaite, +2 bye silencieux. Buchholz = somme des points suisses des adversaires.
         </p>
@@ -1490,7 +1509,7 @@ function StandingsTab({
     return (
       <div className="flex flex-col gap-6">
         {exportBtn}
-        <div className="flex flex-col border-2 border-line">
+        <div className="overflow-x-auto scrollbar-light"><div className="flex flex-col border-2 border-line min-w-max">
           <div className="grid grid-cols-[32px_1fr_60px_80px_80px_80px] bg-ink px-4 py-3">
             {['#', 'Joueur', 'MJ', 'V T1 👑', 'Total V', 'Pts'].map((h) => (
               <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
@@ -1511,6 +1530,7 @@ function StandingsTab({
             </div>
           ))}
         </div>
+        </div>
         <p className="font-sans text-[12px] text-ink-3 border-l-2 border-line-soft pl-3">
           Classement King of Court — rang par victoires sur le terrain 1 (trône), puis total victoires, puis points cumulés.
         </p>
@@ -1522,7 +1542,7 @@ function StandingsTab({
     <div className="flex flex-col gap-6">
       {exportBtn}
       {/* Classement individuel */}
-      <div className="flex flex-col border-2 border-line">
+      <div className="overflow-x-auto scrollbar-light"><div className="flex flex-col border-2 border-line min-w-max">
         <div className="grid grid-cols-[32px_1fr_100px_64px_120px_60px_60px_70px_80px] bg-ink px-4 py-3">
           {['#', 'Joueur', 'Pseudo', 'N° Doss', 'Équipe', 'V', 'D', 'Sets', 'Pts'].map((h) => (
             <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
@@ -1547,10 +1567,11 @@ function StandingsTab({
           )
         })}
       </div>
+      </div>
 
       {/* Classement par paires (doubles uniquement) */}
       {pairStandings.length > 0 && (
-        <div className="flex flex-col border-2 border-line">
+        <div className="overflow-x-auto scrollbar-light"><div className="flex flex-col border-2 border-line min-w-max">
           <div className="grid grid-cols-[32px_1fr_60px_60px_60px] bg-ink px-4 py-3">
             {['#', 'Paire', 'V', 'D', '±Pts'].map((h) => (
               <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo">{h}</span>
@@ -1572,6 +1593,7 @@ function StandingsTab({
               </div>
             )
           })}
+        </div>
         </div>
       )}
     </div>
@@ -1983,17 +2005,41 @@ function BracketTab({
                 </div>
               </div>
             ))}
-            {/* Colonne champion */}
+            {/* Colonne champion — affiche le vainqueur de la finale */}
             <div className="flex flex-col min-w-[140px]">
               <div className="px-4 py-2 bg-ink text-green-fluo text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-center">
                 Champion
               </div>
               <div className="flex-1 flex items-center justify-center px-3 py-4">
-                <div className="border-2 border-green bg-green/5 px-4 py-3 text-center w-full">
-                  <span className="text-[11px] font-mono font-bold text-green uppercase tracking-[0.06em]">
-                    À déterminer
-                  </span>
-                </div>
+                {(() => {
+                  // Le champion = vainqueur de la dernière ronde (finale), si elle est terminée
+                  const finalRound = byRound[byRound.length - 1]
+                  const finalMatch = finalRound?.[1].find((m) => m.status === 'completed' || m.status === 'walkover')
+                  if (finalMatch?.winnerSide) {
+                    const winnerIds = parseTeamIds(finalMatch.winnerSide === 'A' ? finalMatch.teamA : finalMatch.teamB)
+                    const winnerName = resolveTeam(finalMatch.winnerSide === 'A' ? finalMatch.teamA : finalMatch.teamB, allPlayerNames)
+                    return (
+                      <div className="border-2 border-green bg-green/10 px-4 py-3 text-center w-full">
+                        <span className="text-[10px] font-mono font-bold text-ink-3 uppercase tracking-[0.06em] block mb-1">
+                          Vainqueur
+                        </span>
+                        <span className="text-[14px] font-sans font-black text-green leading-tight block">
+                          {winnerName || '?'}
+                        </span>
+                        {winnerIds.length > 1 && (
+                          <span className="text-[10px] font-mono text-ink-3">({winnerIds.length} joueurs)</span>
+                        )}
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className="border-2 border-green bg-green/5 px-4 py-3 text-center w-full">
+                      <span className="text-[11px] font-mono font-bold text-green uppercase tracking-[0.06em]">
+                        À déterminer
+                      </span>
+                    </div>
+                  )
+                })()}
               </div>
             </div>
           </div>
@@ -2319,6 +2365,12 @@ export function TournamentDetail() {
                 poolCount,
                 manualPools,
               })
+              // Paires sous-effectif : poules trop petites pour le moindre match →
+              // pas de phase knockout (placeholders fantômes bloquant la clôture)
+              if (result.poolMatches.length === 0) {
+                if (category) skippedCategories.push(`${category} (poules trop petites : 1 paire max par groupe)`)
+                continue
+              }
               generated = [...result.poolMatches, ...result.knockoutMatches]
               break
             }
@@ -2438,6 +2490,16 @@ export function TournamentDetail() {
                 poolCount,
                 manualPools: filteredManualPools,
               })
+
+              // Catégorie sous-effectif : si les poules sont trop petites pour produire
+              // le moindre match (ex : 2 joueurs répartis en 2 groupes de 1), la phase
+              // knockout n'aura jamais de qualifiés → placeholders fantômes à vie qui
+              // bloquent la clôture. On saute la catégorie avec un avertissement.
+              const poolMatchesCount = result.poolMatches.length
+              if (poolMatchesCount === 0) {
+                if (category) skippedCategories.push(`${category} (poules trop petites : 1 joueur max par groupe)`)
+                continue
+              }
               generated = [...result.poolMatches, ...result.knockoutMatches]
               break
             }
@@ -2658,11 +2720,8 @@ export function TournamentDetail() {
       const totalB = scores.reduce((acc, s) => acc + (s.scoreB ?? 0), 0)
       rows.push([m.round, m.courtNumber, m.category ?? '', nameA, nameB, totalA, totalB, m.status].join(','))
     }
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url
-    a.download = `resultats-${slug}-${date}.csv`
-    a.click(); URL.revokeObjectURL(url)
+    const resultatsCsv = rows.join('\n')
+    void saveTextFile(`resultats-${slug}-${date}.csv`, resultatsCsv, 'text/csv')
   }
 
   const handleExportBackup = () => {
@@ -2713,15 +2772,9 @@ export function TournamentDetail() {
     }
 
     const json = JSON.stringify(snapshot, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
     const slug = tournament.name.replace(/\s+/g, '-').toLowerCase()
     const date = new Date().toISOString().slice(0, 10)
-    a.href = url
-    a.download = `sauvegarde-${slug}-${date}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    void saveTextFile(`sauvegarde-${slug}-${date}.json`, json, 'application/json')
   }
 
   const handleArchive = async () => {
@@ -2768,7 +2821,7 @@ export function TournamentDetail() {
         <div className="flex items-start justify-between pb-4 gap-4 flex-wrap">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <h1 className="font-sans font-black uppercase text-[42px] tracking-[-0.03em] text-ink leading-none">
+              <h1 className="font-sans font-black uppercase text-page-title tracking-[-0.03em] text-ink leading-none">
                 {tournament.name}
               </h1>
               <Badge variant={STATUS_BADGE[tournament.status] ?? 'default'}>
@@ -2887,8 +2940,8 @@ export function TournamentDetail() {
                   </Button>
                 )}
                 <Button variant="secondary" size="sm" onClick={() => setConfirming('stop')}
-                  title="Remettre en brouillon pour stopper le tournoi">
-                  Arrêter le tournoi
+                  title="Repasser le tournoi en brouillon pour modifier le planning — les matchs et scores déjà saisis sont conservés">
+                  Repasser en brouillon
                 </Button>
               </>
             )}
@@ -2914,7 +2967,7 @@ export function TournamentDetail() {
             )}
             {tournament.status === 'active' && confirming === 'stop' && (
               <div className="flex gap-2 items-center">
-                <span className="font-sans text-[13px] text-warn">Remettre en brouillon ? Les matchs sont conservés.</span>
+                <span className="font-sans text-[13px] text-warn">Repasser en brouillon ? Les matchs et scores déjà saisis sont conservés.</span>
                 <Button variant="secondary" size="sm" onClick={() => setConfirming(null)}>Annuler</Button>
                 <Button variant="secondary" size="sm" onClick={handleStop}>Confirmer</Button>
               </div>
@@ -3070,7 +3123,7 @@ export function TournamentDetail() {
               />
             )}
             {tab === 'players' && (
-              <div className="flex flex-col border-2 border-line">
+              <div className="overflow-x-auto scrollbar-light"><div className="flex flex-col border-2 border-line min-w-max">
                 <div className="grid grid-cols-[48px_140px_120px_120px_44px_120px_1fr_80px] bg-ink px-4 py-3">
                   {['N° Doss.', 'Nom', 'Prénom', 'Pseudo', 'G.', 'Niveau', 'Équipe', 'ELO'].map((h) => (
                     <span key={h} className="text-[11px] font-mono font-bold uppercase tracking-[0.08em] text-green-fluo px-1">{h}</span>
@@ -3102,6 +3155,7 @@ export function TournamentDetail() {
                     </div>
                   ))
                 )}
+              </div>
               </div>
             )}
           </>

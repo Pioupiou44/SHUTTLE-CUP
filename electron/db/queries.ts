@@ -441,8 +441,8 @@ export const matchQueries = {
       'SELECT id FROM matches WHERE tournamentId = ? AND round = ? ORDER BY id'
     ).all(tournamentId, nextRound) as { id: number }[]
 
+    // Match cible en ronde suivante — null si FINALE (pas de round suivant)
     const targetMatch = nextMatches[Math.floor(position / 2)]
-    if (!targetMatch) return
 
     const side = position % 2 === 0 ? 'A' : 'B'
 
@@ -463,12 +463,17 @@ export const matchQueries = {
       'SELECT tournamentPlayerId FROM match_participants WHERE matchId = ? AND side = ?'
     ).all(completedMatchId, winnerSide) as { tournamentPlayerId: number }[]
 
-    // Enregistre le vainqueur sur le match terminé (référence tournament_players.id)
+    // Enregistre le vainqueur sur le match terminé AVANT de chercher le prochain
+    // match : pour la FINALE il n'y a pas de round suivant — sans ça, le champion
+    // n'était jamais persisté (winnerId restait NULL).
     db.prepare('UPDATE matches SET winnerId = ? WHERE id = ?').run(tp.id, completedMatchId)
 
     // Cas BYE : le joueur n'a pas de participation enregistrée — on l'avance quand même
     const finalParticipants: { tournamentPlayerId: number }[] =
       winnerParticipants.length > 0 ? winnerParticipants : [{ tournamentPlayerId: tp.id }]
+
+    // Finale : pas de match suivant — le vainqueur est enregistré, on s'arrête ici
+    if (!targetMatch) return
 
     // Ne pas avancer si le créneau est déjà occupé (ex: matchs de poule round N+1)
     const occupied = db.prepare(
@@ -731,4 +736,153 @@ export function importTournament(snapshot: SnapshotPayload): { tournamentId: num
   })()
 
   return { tournamentId: newTournamentId }
+}
+
+// ─── Import d'une sauvegarde complète ──────────────────────────────────────
+
+type FullBackupPlayer = {
+  firstName: string; lastName: string; pseudo?: string; gender: string
+  level: string; club?: string; elo?: number; playerNumber?: number; status?: string
+}
+
+type FullBackupRule = {
+  name: string; setsToWin: number; pointsPerSet: number
+  hasDeuce: boolean; maxScore: number; goldenPoint: boolean
+}
+
+type FullBackupTournament = {
+  name: string; date: string; location?: string
+  courtCount?: number; poolCount?: number
+  format: string; status?: string; scoringRuleId?: number
+  categories?: string[]; teamMode?: number
+  teamAName?: string; teamBName?: string; teamNames?: string[]
+  tournamentPlayers?: Array<{
+    playerId: number; seed?: number; teamSide?: string
+    firstName?: string; lastName?: string
+    pseudo?: string; gender?: string; level?: string
+  }>
+  matches?: Array<{
+    id?: number
+    round?: number; courtNumber?: number; status: string
+    category?: string; comment?: string
+    teamA?: string; teamB?: string
+    winnerSide?: string
+  }>
+  matchScores?: Array<{ matchId: number; setNumber: number; scoreA: number; scoreB: number }>
+}
+
+export type FullBackupPayload = {
+  version: number
+  players?: FullBackupPlayer[]
+  scoringRules?: FullBackupRule[]
+  tournaments?: FullBackupTournament[]
+}
+
+/**
+ * Importe une sauvegarde complète (joueurs + règles + tournois avec matchs/scores).
+ * Best-effort : les éléments existants (même nom) sont ignorés, les tournois
+ * mal formés sont sautés sans interrompre l'import.
+ */
+export function importFullBackup(
+  backup: FullBackupPayload,
+  importOneTournament: (snapshot: SnapshotPayload) => { tournamentId: number }
+): { playersImported: number; rulesImported: number; tournamentsImported: number } {
+  const db = getDb()
+  let playersImported = 0
+  let rulesImported = 0
+  let tournamentsImported = 0
+
+  // Joueurs — dédoublonnage prénom + nom (cohérent avec importTournament)
+  for (const p of backup.players ?? []) {
+    const existing = db.prepare(
+      'SELECT id FROM players WHERE firstName = ? AND lastName = ?'
+    ).get(p.firstName, p.lastName) as { id: number } | undefined
+    if (existing) continue
+    db.prepare(
+      'INSERT INTO players (firstName, lastName, pseudo, gender, level, club, elo, playerNumber, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      p.firstName, p.lastName, p.pseudo ?? null, p.gender, p.level,
+      p.club ?? null, p.elo ?? 1000, p.playerNumber ?? null, p.status ?? 'active'
+    )
+    playersImported++
+  }
+
+  // Règles custom — les presets officiels existent déjà via le schéma
+  for (const r of backup.scoringRules ?? []) {
+    const existing = db.prepare('SELECT id FROM scoring_rules WHERE name = ?').get(r.name) as { id: number } | undefined
+    if (existing) continue
+    db.prepare(
+      'INSERT INTO scoring_rules (name, setsToWin, pointsPerSet, hasDeuce, maxScore, goldenPoint, isCustom) VALUES (?, ?, ?, ?, ?, ?, 1)'
+    ).run(r.name, r.setsToWin, r.pointsPerSet, r.hasDeuce ? 1 : 0, r.maxScore, r.goldenPoint ? 1 : 0)
+    rulesImported++
+  }
+
+  // Tournois — reconstruction d'un snapshot standard puis import
+  for (const t of backup.tournaments ?? []) {
+    const tps = t.tournamentPlayers ?? []
+    const players = tps.map((tp) => ({
+      firstName: tp.firstName ?? `Joueur ${tp.playerId}`,
+      lastName: tp.lastName ?? `#${tp.playerId}`,
+      pseudo: tp.pseudo,
+      gender: tp.gender === 'F' ? 'F' : 'M',
+      level: tp.level ?? 'Intermédiaire',
+      seed: tp.seed,
+      teamSide: tp.teamSide,
+    }))
+    const playerIdToIndex = new Map<number, number>()
+    tps.forEach((tp, idx) => playerIdToIndex.set(tp.playerId, idx))
+
+    const idToScores = new Map<number, Array<{ setNumber: number; scoreA: number; scoreB: number }>>()
+    for (const ms of t.matchScores ?? []) {
+      const list = idToScores.get(ms.matchId) ?? []
+      list.push({ setNumber: ms.setNumber, scoreA: ms.scoreA, scoreB: ms.scoreB })
+      idToScores.set(ms.matchId, list)
+    }
+
+    const snapshot: SnapshotPayload = {
+      version: 1,
+      tournament: {
+        name: t.name,
+        date: t.date,
+        location: t.location,
+        courtCount: Number(t.courtCount ?? 4),
+        poolCount: Number(t.poolCount ?? 2),
+        format: String(t.format ?? 'round-robin'),
+        status: String(t.status ?? 'draft'),
+        scoringRuleId: t.scoringRuleId ? Number(t.scoringRuleId) : undefined,
+        categories: (t.categories ?? []) as string[],
+        teamMode: Number(t.teamMode ?? 0),
+        teamAName: t.teamAName,
+        teamBName: t.teamBName,
+        teamNames: t.teamNames,
+      },
+      players,
+      matches: (t.matches ?? []).map((m) => {
+        const parseIndices = (csv: string | undefined) =>
+          (csv ?? '').split(',').filter(Boolean)
+            .map((s) => playerIdToIndex.get(Number(s)) ?? -1)
+            .filter((i) => i >= 0)
+        return {
+          round: m.round,
+          courtNumber: m.courtNumber,
+          status: m.status,
+          category: m.category,
+          comment: m.comment,
+          teamAIndices: parseIndices(m.teamA),
+          teamBIndices: parseIndices(m.teamB),
+          winnerSide: m.winnerSide,
+          scores: idToScores.get(m.id ?? -1) ?? [],
+        }
+      }),
+    }
+
+    try {
+      importOneTournament(snapshot)
+      tournamentsImported++
+    } catch {
+      // Tournoi mal formé : ignoré (best-effort)
+    }
+  }
+
+  return { playersImported, rulesImported, tournamentsImported }
 }
